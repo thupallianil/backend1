@@ -1,0 +1,1 @@
+REQ: {'username': 'THUPALLI ANIL KUMAR', 'email': 'thupallianil12@gmail.com', 'password': 'Anil@12345', 'password_confirm': 'Anil@12345', 'role': 'admin'} | ERR: {'email': [ErrorDetail(string='Email already exists.', code='invalid')]}
