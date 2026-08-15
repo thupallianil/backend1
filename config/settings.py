@@ -35,10 +35,25 @@ DEBUG = (
     == "true"
 )
 
+
+# ============================================================
+# ALLOWED HOSTS
+# ============================================================
+
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
 ]
+
+# Render provides this automatically.
+render_host = os.environ.get(
+    "RENDER_EXTERNAL_HOSTNAME"
+)
+
+if render_host:
+    ALLOWED_HOSTS.append(
+        render_host
+    )
 
 
 # ============================================================
@@ -104,7 +119,8 @@ ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [
     {
-        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "BACKEND":
+            "django.template.backends.django.DjangoTemplates",
 
         "DIRS": [],
 
@@ -112,8 +128,11 @@ TEMPLATES = [
 
         "OPTIONS": {
             "context_processors": [
+
                 "django.template.context_processors.request",
+
                 "django.contrib.auth.context_processors.auth",
+
                 "django.contrib.messages.context_processors.messages",
             ],
         },
@@ -136,8 +155,11 @@ ASGI_APPLICATION = "config.asgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "ENGINE":
+            "django.db.backends.sqlite3",
+
+        "NAME":
+            BASE_DIR / "db.sqlite3",
     }
 }
 
@@ -147,29 +169,37 @@ DATABASES = {
 # ============================================================
 
 AUTH_PASSWORD_VALIDATORS = [
+
     {
-        "NAME": (
-            "django.contrib.auth.password_validation."
-            "UserAttributeSimilarityValidator"
-        ),
+        "NAME":
+            (
+                "django.contrib.auth.password_validation."
+                "UserAttributeSimilarityValidator"
+            ),
     },
+
     {
-        "NAME": (
-            "django.contrib.auth.password_validation."
-            "MinimumLengthValidator"
-        ),
+        "NAME":
+            (
+                "django.contrib.auth.password_validation."
+                "MinimumLengthValidator"
+            ),
     },
+
     {
-        "NAME": (
-            "django.contrib.auth.password_validation."
-            "CommonPasswordValidator"
-        ),
+        "NAME":
+            (
+                "django.contrib.auth.password_validation."
+                "CommonPasswordValidator"
+            ),
     },
+
     {
-        "NAME": (
-            "django.contrib.auth.password_validation."
-            "NumericPasswordValidator"
-        ),
+        "NAME":
+            (
+                "django.contrib.auth.password_validation."
+                "NumericPasswordValidator"
+            ),
     },
 ]
 
@@ -212,71 +242,72 @@ MEDIA_ROOT = BASE_DIR / "media"
 REST_FRAMEWORK = {
 
     # --------------------------------------------------------
-    # JWT ONLY
-    # --------------------------------------------------------
-    #
-    # Important:
-    # Every protected API request must contain:
-    #
-    # Authorization: Bearer <access_token>
-    #
+    # AUTHENTICATION
     # --------------------------------------------------------
 
     "DEFAULT_AUTHENTICATION_CLASSES": [
+
         "rest_framework_simplejwt.authentication.JWTAuthentication",
-        "rest_framework.authentication.SessionAuthentication",  # enables DRF browser Login button
+
+        # Required for DRF browsable API login.
+        "rest_framework.authentication.SessionAuthentication",
     ],
 
     # --------------------------------------------------------
-    # Protected by default
+    # DEFAULT PERMISSION
     # --------------------------------------------------------
 
     "DEFAULT_PERMISSION_CLASSES": [
+
         "rest_framework.permissions.IsAuthenticated",
     ],
 
     # --------------------------------------------------------
-    # Pagination
+    # PAGINATION
     # --------------------------------------------------------
 
-    "DEFAULT_PAGINATION_CLASS": (
-        "api.pagination.StandardPagination"
-    ),
+    "DEFAULT_PAGINATION_CLASS":
+        "api.pagination.StandardPagination",
 
     "PAGE_SIZE": 20,
 
     # --------------------------------------------------------
-    # Renderers
+    # RENDERERS
     # --------------------------------------------------------
 
     "DEFAULT_RENDERER_CLASSES": [
+
         "rest_framework.renderers.JSONRenderer",
+
         "rest_framework.renderers.BrowsableAPIRenderer",
     ],
 
     # --------------------------------------------------------
-    # Parsers
+    # PARSERS
     # --------------------------------------------------------
 
     "DEFAULT_PARSER_CLASSES": [
+
         "rest_framework.parsers.JSONParser",
+
         "rest_framework.parsers.MultiPartParser",
+
         "rest_framework.parsers.FormParser",
     ],
 
     # --------------------------------------------------------
-    # OpenAPI
+    # OPENAPI
     # --------------------------------------------------------
 
-    "DEFAULT_SCHEMA_CLASS": (
-        "drf_spectacular.openapi.AutoSchema"
-    ),
+    "DEFAULT_SCHEMA_CLASS":
+        "drf_spectacular.openapi.AutoSchema",
 
     # --------------------------------------------------------
-    # Custom Exception Handler
+    # CUSTOM EXCEPTION HANDLER
     # --------------------------------------------------------
 
-    "EXCEPTION_HANDLER": "api.exceptions.custom_exception_handler",
+    "EXCEPTION_HANDLER":
+        "api.exceptions.custom_exception_handler",
 }
 
 
@@ -286,22 +317,22 @@ REST_FRAMEWORK = {
 
 SIMPLE_JWT = {
 
-    # Access token
-    "ACCESS_TOKEN_LIFETIME": timedelta(
-        hours=24
-    ),
+    # --------------------------------------------------------
+    # ACCESS TOKEN
+    # --------------------------------------------------------
 
-    # Refresh token
-    "REFRESH_TOKEN_LIFETIME": timedelta(
-        days=30
-    ),
+    "ACCESS_TOKEN_LIFETIME":
+        timedelta(hours=24),
 
     # --------------------------------------------------------
-    # IMPORTANT
-    #
-    # Keep rotation OFF because your custom /auth/refresh/
-    # endpoint returns the access token and the frontend
-    # already stores access_token + refresh_token.
+    # REFRESH TOKEN
+    # --------------------------------------------------------
+
+    "REFRESH_TOKEN_LIFETIME":
+        timedelta(days=30),
+
+    # --------------------------------------------------------
+    # REFRESH TOKEN ROTATION
     # --------------------------------------------------------
 
     "ROTATE_REFRESH_TOKENS": False,
@@ -309,7 +340,7 @@ SIMPLE_JWT = {
     "BLACKLIST_AFTER_ROTATION": False,
 
     # --------------------------------------------------------
-    # Authorization header
+    # AUTHORIZATION HEADER
     # --------------------------------------------------------
 
     "AUTH_HEADER_TYPES": (
@@ -317,7 +348,7 @@ SIMPLE_JWT = {
     ),
 
     # --------------------------------------------------------
-    # User identification
+    # USER IDENTIFICATION
     # --------------------------------------------------------
 
     "USER_ID_FIELD": "id",
@@ -325,7 +356,7 @@ SIMPLE_JWT = {
     "USER_ID_CLAIM": "user_id",
 
     # --------------------------------------------------------
-    # Token algorithm
+    # TOKEN ALGORITHM
     # --------------------------------------------------------
 
     "ALGORITHM": "HS256",
@@ -354,13 +385,17 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
 
     # --------------------------------------------------------
-    # Swagger UI
+    # SWAGGER UI
     # --------------------------------------------------------
 
     "SWAGGER_UI_SETTINGS": {
+
         "deepLinking": True,
+
         "persistAuthorization": True,
+
         "displayRequestDuration": True,
+
         "filter": True,
     },
 
@@ -369,7 +404,7 @@ SPECTACULAR_SETTINGS = {
     "COMPONENT_SPLIT_REQUEST": True,
 
     # --------------------------------------------------------
-    # JWT Bearer Authentication
+    # JWT BEARER AUTHENTICATION
     # --------------------------------------------------------
 
     "SECURITY": [
@@ -379,11 +414,17 @@ SPECTACULAR_SETTINGS = {
     ],
 
     "APPEND_COMPONENTS": {
+
         "securitySchemes": {
+
             "BearerAuth": {
+
                 "type": "http",
+
                 "scheme": "bearer",
+
                 "bearerFormat": "JWT",
+
                 "description": (
                     "Enter your JWT access token. "
                     "Example: Bearer eyJhbGciOiJIUzI1Ni..."
@@ -395,7 +436,18 @@ SPECTACULAR_SETTINGS = {
 
 
 # ============================================================
-# RAZORPAY
+# RAZORPAY PAYMENT GATEWAY
+# ============================================================
+#
+# IMPORTANT:
+# Keep this Razorpay configuration ONLY ONCE.
+#
+# The actual values must come from:
+# .env locally
+# OR
+# Render Environment Variables in production.
+#
+# NEVER put the secret key in React/Vite frontend code.
 # ============================================================
 
 RAZORPAY_KEY_ID = os.environ.get(
@@ -420,24 +472,49 @@ RAZORPAY_WEBHOOK_SECRET = os.environ.get(
 
 CORS_ALLOWED_ORIGINS = [
 
-    # Vite
+    # --------------------------------------------------------
+    # VITE LOCALHOST
+    # --------------------------------------------------------
+
     "http://localhost:5173",
     "http://localhost:5174",
     "http://localhost:5175",
     "http://localhost:5176",
 
-    # Other local frontend servers
+    # --------------------------------------------------------
+    # OTHER LOCAL FRONTEND SERVERS
+    # --------------------------------------------------------
+
     "http://localhost:3000",
     "http://localhost:8080",
 
+    # --------------------------------------------------------
     # 127.0.0.1
+    # --------------------------------------------------------
+
     "http://127.0.0.1:5173",
     "http://127.0.0.1:5174",
     "http://127.0.0.1:5175",
     "http://127.0.0.1:5176",
+
     "http://127.0.0.1:3000",
     "http://127.0.0.1:8080",
 ]
+
+
+# ------------------------------------------------------------
+# VERCEL FRONTEND
+# ------------------------------------------------------------
+
+vercel_frontend_url = os.environ.get(
+    "FRONTEND_URL"
+)
+
+if vercel_frontend_url:
+
+    CORS_ALLOWED_ORIGINS.append(
+        vercel_frontend_url.rstrip("/")
+    )
 
 
 CORS_ALLOW_CREDENTIALS = True
@@ -455,14 +532,23 @@ CORS_URLS_REGEX = r"^/api/.*$"
 # ============================================================
 
 CORS_ALLOW_HEADERS = [
+
     "accept",
+
     "accept-encoding",
+
     "authorization",
+
     "content-type",
+
     "dnt",
+
     "origin",
+
     "user-agent",
+
     "x-csrftoken",
+
     "x-requested-with",
 ]
 
@@ -472,11 +558,17 @@ CORS_ALLOW_HEADERS = [
 # ============================================================
 
 CORS_ALLOW_METHODS = [
+
     "DELETE",
+
     "GET",
+
     "OPTIONS",
+
     "PATCH",
+
     "POST",
+
     "PUT",
 ]
 
@@ -486,6 +578,10 @@ CORS_ALLOW_METHODS = [
 # ============================================================
 
 CSRF_TRUSTED_ORIGINS = [
+
+    # --------------------------------------------------------
+    # LOCAL
+    # --------------------------------------------------------
 
     "http://localhost:5173",
     "http://localhost:5174",
@@ -497,6 +593,17 @@ CSRF_TRUSTED_ORIGINS = [
     "http://127.0.0.1:5175",
     "http://127.0.0.1:5176",
 ]
+
+
+# ------------------------------------------------------------
+# VERCEL FRONTEND CSRF ORIGIN
+# ------------------------------------------------------------
+
+if vercel_frontend_url:
+
+    CSRF_TRUSTED_ORIGINS.append(
+        vercel_frontend_url.rstrip("/")
+    )
 
 
 # ============================================================
@@ -543,20 +650,6 @@ DEFAULT_FROM_EMAIL = os.environ.get(
     EMAIL_HOST_USER,
 )
 
-
-# ============================================================
-# RAZORPAY PAYMENT GATEWAY
-# ============================================================
-
-RAZORPAY_KEY_ID = os.environ.get(
-    "RAZORPAY_KEY_ID",
-    "rzp_test_5173DemoKey",
-)
-
-RAZORPAY_KEY_SECRET = os.environ.get(
-    "RAZORPAY_KEY_SECRET",
-    "razorpaySecretMockDemoSecretKey",
-)
 
 # ============================================================
 # DEFAULT PRIMARY KEY
