@@ -26,6 +26,10 @@ from api.invoices.serializers import InvoiceSerializer
 from .serializers import QuoteSerializer
 
 
+def is_admin_user(user):
+    return bool(user.is_staff or user.is_superuser)
+
+
 def get_user_business(user):
     return BusinessProfile.objects.filter(owner=user).first()
 
@@ -39,13 +43,12 @@ def get_user_business(user):
 @permission_classes([IsAuthenticated])
 def quote_list_create(request):
 
-    business = get_user_business(
-        request.user
-    )
+    is_admin = is_admin_user(request.user)
+    business = get_user_business(request.user) if is_admin else None
 
     if request.method == "GET":
 
-        if business:
+        if is_admin:
             quotes = Quote.objects.filter(
                 business=business
             ).select_related(
@@ -56,7 +59,7 @@ def quote_list_create(request):
                 "-created_at"
             )
         else:
-            # Client portal user
+            # Client portal user: strictly client's own quotes
             quotes = Quote.objects.filter(
                 client__email__iexact=request.user.email
             ).select_related(
@@ -187,11 +190,10 @@ def quote_list_create(request):
 @permission_classes([IsAuthenticated])
 def quote_detail(request, pk):
 
-    business = get_user_business(
-        request.user
-    )
+    is_admin = is_admin_user(request.user)
+    business = get_user_business(request.user) if is_admin else None
 
-    if business:
+    if is_admin:
         quote = get_object_or_404(
             Quote.objects.select_related(
                 "client"
@@ -202,6 +204,7 @@ def quote_detail(request, pk):
             business=business,
         )
     else:
+        # Client user - strictly client's own quote
         quote = get_object_or_404(
             Quote.objects.select_related(
                 "client", "business"
@@ -571,9 +574,10 @@ def quote_pdf(request, pk):
     from django.http import HttpResponse
     from .pdf import generate_quote_pdf
 
-    business = get_user_business(request.user)
+    is_admin = is_admin_user(request.user)
+    business = get_user_business(request.user) if is_admin else None
 
-    if business:
+    if is_admin:
         quote = get_object_or_404(
             Quote.objects.select_related("client", "business").prefetch_related("items"),
             pk=pk,

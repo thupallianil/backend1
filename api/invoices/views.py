@@ -27,6 +27,10 @@ from .pdf import generate_invoice_pdf
 from .serializers import InvoiceSerializer
 
 
+def is_admin_user(user):
+    return bool(user.is_staff or user.is_superuser)
+
+
 def get_user_business(user):
     return BusinessProfile.objects.filter(owner=user).first()
 
@@ -40,7 +44,8 @@ def get_user_business(user):
 @permission_classes([IsAuthenticated])
 def invoice_list_create(request):
 
-    business = get_user_business(request.user)
+    is_admin = is_admin_user(request.user)
+    business = get_user_business(request.user) if is_admin else None
 
     # ========================================================
     # GET ALL INVOICES
@@ -48,7 +53,7 @@ def invoice_list_create(request):
 
     if request.method == "GET":
 
-        if business:
+        if is_admin:
             invoices = (
                 Invoice.objects
                 .filter(business=business)
@@ -57,7 +62,7 @@ def invoice_list_create(request):
                 .order_by("-created_at")
             )
         else:
-            # Client portal user
+            # Client portal user: strictly client's own invoices
             invoices = (
                 Invoice.objects
                 .filter(client__email__iexact=request.user.email)
@@ -146,11 +151,10 @@ def invoice_list_create(request):
 @permission_classes([IsAuthenticated])
 def invoice_detail(request, pk):
 
-    business = get_user_business(
-        request.user
-    )
+    is_admin = is_admin_user(request.user)
+    business = get_user_business(request.user) if is_admin else None
 
-    if business:
+    if is_admin:
         invoice = get_object_or_404(
             Invoice.objects
             .select_related(
@@ -164,7 +168,7 @@ def invoice_detail(request, pk):
             business=business,
         )
     else:
-        # Client user
+        # Client user - strictly client's own invoice
         invoice = get_object_or_404(
             Invoice.objects
             .select_related(
@@ -269,12 +273,10 @@ def invoice_detail(request, pk):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def invoice_pdf(request, pk):
+    is_admin = is_admin_user(request.user)
+    business = get_user_business(request.user) if is_admin else None
 
-    business = get_user_business(
-        request.user
-    )
-
-    if business:
+    if is_admin:
         invoice = get_object_or_404(
             Invoice.objects
             .select_related(

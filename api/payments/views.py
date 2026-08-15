@@ -18,6 +18,10 @@ from .serializers import PaymentSerializer
 from .gateway import get_razorpay_gateway
 
 
+def is_admin_user(user):
+    return bool(user.is_staff or user.is_superuser)
+
+
 def get_user_business(user):
     return BusinessProfile.objects.filter(owner=user).first()
 
@@ -49,14 +53,16 @@ def record_successful_payment(payment):
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 def payment_list_create(request):
-    business = get_user_business(request.user)
+    is_admin = is_admin_user(request.user)
+    business = get_user_business(request.user) if is_admin else None
 
     if request.method == "GET":
-        if business:
+        if is_admin:
             payments = Payment.objects.filter(
                 business=business
             ).order_by("-created_at")
         else:
+            # Client portal user: strictly client's own payments
             payments = Payment.objects.filter(
                 invoice__client__email__iexact=request.user.email
             ).order_by("-created_at")
@@ -110,15 +116,17 @@ def payment_list_create(request):
 @api_view(["GET", "PUT", "PATCH", "DELETE"])
 @permission_classes([IsAuthenticated])
 def payment_detail(request, pk):
-    business = get_user_business(request.user)
+    is_admin = is_admin_user(request.user)
+    business = get_user_business(request.user) if is_admin else None
 
-    if business:
+    if is_admin:
         payment = get_object_or_404(
             Payment,
             pk=pk,
             business=business,
         )
     else:
+        # Client user: strictly client's own payment
         payment = get_object_or_404(
             Payment,
             pk=pk,
@@ -218,7 +226,8 @@ def create_payment_order(request):
     Body: { "invoice_id": <int>, "amount": <decimal> }
     Create a real Razorpay payment order.
     """
-    business = get_user_business(request.user)
+    is_admin = is_admin_user(request.user)
+    business = get_user_business(request.user) if is_admin else None
 
     invoice_id = request.data.get("invoice_id")
     amount = request.data.get("amount")
@@ -229,7 +238,7 @@ def create_payment_order(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    if business:
+    if is_admin:
         invoice = get_object_or_404(Invoice, pk=invoice_id, business=business)
     else:
         invoice = get_object_or_404(Invoice, pk=invoice_id, client__email__iexact=request.user.email)
@@ -304,7 +313,8 @@ def verify_payment(request):
     Body: { "payment_id": <int>, "gateway_payment_id": <str>, "gateway_signature": <str> }
     Verify actual Razorpay signature.
     """
-    business = get_user_business(request.user)
+    is_admin = is_admin_user(request.user)
+    business = get_user_business(request.user) if is_admin else None
 
     payment_id = request.data.get("payment_id")
     gateway_payment_id = request.data.get("gateway_payment_id", "")
@@ -316,7 +326,7 @@ def verify_payment(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    if business:
+    if is_admin:
         payment = get_object_or_404(Payment, pk=payment_id, business=business)
     else:
         payment = get_object_or_404(Payment, pk=payment_id, invoice__client__email__iexact=request.user.email)
@@ -357,7 +367,46 @@ def verify_payment(request):
     payment.gateway_payment_id = gateway_payment_id
     payment.gateway_signature = gateway_signature
     payment.transaction_id = gateway_payment_id
-    payment.save(update_fields=["gateway_payment_id", "gateway_signature", "transaction_id", "updated_at"])
+
+    # Fetch actual real payment method details from Razorpay
+    try:
+        rzp_payment = gateway.get_payment(gateway_payment_id)
+        if isinstance(rzp_payment, dict):
+            rzp_method = str(rzp_payment.get("method", "")).lower()
+            method_map = {
+                "upi": Payment.Method.UPI,
+                "card": Payment.Method.CARD,
+                "netbanking": Payment.Method.BANK,
+                "wallet": Payment.Method.ONLINE,
+                "emi": Payment.Method.CARD,
+                "paylater": Payment.Method.ONLINE,
+            }
+            if rzp_method in method_map:
+                payment.method = method_map[rzp_method]
+
+            vpa = rzp_payment.get("vpa")
+            bank = rzp_payment.get("bank")
+            wallet = rzp_payment.get("wallet")
+            card_obj = rzp_payment.get("card")
+
+            note_parts = [f"Razorpay ({rzp_method.upper()})"]
+            if vpa:
+                note_parts.append(f"VPA: {vpa}")
+            if bank:
+                note_parts.append(f"Bank: {bank}")
+            if wallet:
+                note_parts.append(f"Wallet: {wallet}")
+            if isinstance(card_obj, dict):
+                network = card_obj.get("network") or "Card"
+                last4 = card_obj.get("last4")
+                if last4:
+                    note_parts.append(f"{network} ...{last4}")
+
+            payment.notes = " | ".join(note_parts)
+    except Exception:
+        pass
+
+    payment.save(update_fields=["gateway_payment_id", "gateway_signature", "transaction_id", "method", "notes", "updated_at"])
 
     try:
         payment, _ = record_successful_payment(payment)
@@ -369,6 +418,7 @@ def verify_payment(request):
         "message": "Payment verified successfully.",
         "data": PaymentSerializer(payment).data,
     })
+
 
 
 @extend_schema(tags=["Payments"], exclude=True)
@@ -413,9 +463,9 @@ def payment_webhook(request):
         settings_obj = AppSettings.objects.filter(business=payment.business).first()
         payment_settings = settings_obj.payment_settings if settings_obj else {}
         
-        webhook_secret = payment_settings.get("razorpayWebhookSecret")
+        webhook_secret = payment_settings.get("razorpayWebhookSecret") or getattr(settings, "RAZORPAY_WEBHOOK_SECRET", None) or payment_settings.get("razorpaySecretKey")
         if not webhook_secret:
-            return Response({"success": False, "message": "Webhook secret not configured for this business"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"success": False, "message": "Webhook secret not configured."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Setup gateway (we need the key_secret to verify webhook signature)
         key_id = payment_settings.get("razorpayKeyId")
@@ -426,6 +476,7 @@ def payment_webhook(request):
         is_valid = gateway.verify_webhook_signature(
             payload=request.body,
             signature=signature,
+            secret=webhook_secret,
         )
 
         if not is_valid:
@@ -460,7 +511,8 @@ def manual_payment(request):
     Body: { "invoice_id": <int>, "amount": <decimal>, "method": "cash"|"bank"|"upi"|"card"|"other", "transaction_id": "", "notes": "" }
     Records a manual (offline/direct) payment with genuine UTR/Transaction reference and updates invoice balance.
     """
-    business = get_user_business(request.user)
+    is_admin = is_admin_user(request.user)
+    business = get_user_business(request.user) if is_admin else None
 
     invoice_id = request.data.get("invoice_id")
     amount = request.data.get("amount")
@@ -473,7 +525,7 @@ def manual_payment(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    if business:
+    if is_admin:
         invoice = get_object_or_404(Invoice, pk=invoice_id, business=business)
     else:
         invoice = get_object_or_404(Invoice, pk=invoice_id, client__email__iexact=request.user.email)
@@ -552,3 +604,54 @@ def manual_payment(request):
         },
         status=status.HTTP_201_CREATED,
     )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def confirm_payment(request, pk):
+    """
+    POST /api/payments/<id>/confirm/
+    Admin confirms/approves a pending payment record.
+    """
+    is_admin = is_admin_user(request.user)
+    if not is_admin:
+        return Response({"success": False, "message": "Admin authorization required."}, status=status.HTTP_403_FORBIDDEN)
+
+    business = get_user_business(request.user)
+    payment = get_object_or_404(Payment, pk=pk, business=business)
+
+    if payment.status == Payment.Status.SUCCESS:
+        return Response({"success": True, "message": "Payment is already marked as success.", "data": PaymentSerializer(payment).data})
+
+    try:
+        payment, _ = record_successful_payment(payment)
+    except ValueError as exc:
+        return Response({"success": False, "message": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response({
+        "success": True,
+        "message": "Payment confirmed and marked as SUCCESS.",
+        "data": PaymentSerializer(payment).data,
+    })
+
+
+@api_view(["POST", "DELETE"])
+@permission_classes([IsAuthenticated])
+def clean_pending_payments(request):
+    """
+    POST/DELETE /api/payments/clean-pending/
+    Cleans up stale / uncompleted checkout attempts.
+    """
+    is_admin = is_admin_user(request.user)
+    if not is_admin:
+        return Response({"success": False, "message": "Admin authorization required."}, status=status.HTTP_403_FORBIDDEN)
+
+    business = get_user_business(request.user)
+    deleted_count, _ = Payment.objects.filter(business=business, status=Payment.Status.PENDING).delete()
+
+    return Response({
+        "success": True,
+        "message": f"Successfully cleaned {deleted_count} pending payment records.",
+        "deleted_count": deleted_count,
+    })
+

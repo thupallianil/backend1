@@ -5,10 +5,26 @@ from rest_framework import serializers
 from ..models import Client
 
 
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+
 class ClientSerializer(serializers.ModelSerializer):
     quote_count = serializers.SerializerMethodField()
     invoice_count = serializers.SerializerMethodField()
     outstanding = serializers.SerializerMethodField()
+    has_portal_access = serializers.SerializerMethodField()
+    password = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+    )
+    create_portal_access = serializers.BooleanField(
+        write_only=True,
+        required=False,
+        default=True,
+    )
 
     class Meta:
         model = Client
@@ -25,7 +41,15 @@ class ClientSerializer(serializers.ModelSerializer):
             "quote_count",
             "invoice_count",
             "outstanding",
+            "has_portal_access",
+            "password",
+            "create_portal_access",
         ]
+
+    def get_has_portal_access(self, obj):
+        if not obj.email:
+            return False
+        return User.objects.filter(email__iexact=obj.email).exists()
 
     def get_quote_count(self, obj):
         return obj.quotes.count()

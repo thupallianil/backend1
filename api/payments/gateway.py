@@ -184,6 +184,7 @@ class RazorpayGateway:
         self,
         payload,
         signature,
+        secret=None,
     ):
         """
         Verify Razorpay webhook signature.
@@ -191,11 +192,9 @@ class RazorpayGateway:
         payload MUST be the exact raw
         request body bytes.
         """
+        secret_to_use = secret or getattr(settings, "RAZORPAY_WEBHOOK_SECRET", None) or self.key_secret
 
-        if not payload:
-            return False
-
-        if not signature:
+        if not payload or not signature or not secret_to_use:
             return False
 
         if isinstance(
@@ -207,7 +206,7 @@ class RazorpayGateway:
             )
 
         expected_signature = hmac.new(
-            self.key_secret.encode("utf-8"),
+            secret_to_use.encode("utf-8"),
             payload,
             hashlib.sha256,
         ).hexdigest()

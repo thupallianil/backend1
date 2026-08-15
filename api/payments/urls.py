@@ -3,6 +3,7 @@ from .views import (
     payment_list_create, payment_detail,
     create_payment_order, verify_payment,
     payment_webhook, manual_payment,
+    confirm_payment, clean_pending_payments,
 )
 
 urlpatterns = [
@@ -11,5 +12,7 @@ urlpatterns = [
     path("verify/", verify_payment, name="payment-verify"),
     path("webhook/", payment_webhook, name="payment-webhook"),
     path("manual/", manual_payment, name="payment-manual"),
+    path("clean-pending/", clean_pending_payments, name="payment-clean-pending"),
     path("<int:pk>/", payment_detail, name="payment-detail"),
+    path("<int:pk>/confirm/", confirm_payment, name="payment-confirm"),
 ]

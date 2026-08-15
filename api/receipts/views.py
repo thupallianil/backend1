@@ -25,6 +25,10 @@ from api.models import AppSettings, BusinessProfile, Receipt
 from .serializers import ReceiptSerializer
 
 
+def is_admin_user(user):
+    return bool(user.is_staff or user.is_superuser)
+
+
 def get_user_business(user):
     return BusinessProfile.objects.filter(owner=user).first()
 
@@ -32,13 +36,15 @@ def get_user_business(user):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def receipt_list(request):
-    business = get_user_business(request.user)
+    is_admin = is_admin_user(request.user)
+    business = get_user_business(request.user) if is_admin else None
 
-    if business:
+    if is_admin:
         receipts = Receipt.objects.filter(
             business=business
         ).order_by("-created_at")
     else:
+        # Client portal user: strictly client's own receipts
         receipts = Receipt.objects.filter(
             invoice__client__email__iexact=request.user.email
         ).order_by("-created_at")
@@ -58,15 +64,17 @@ def receipt_list(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def receipt_detail(request, pk):
-    business = get_user_business(request.user)
+    is_admin = is_admin_user(request.user)
+    business = get_user_business(request.user) if is_admin else None
 
-    if business:
+    if is_admin:
         receipt = get_object_or_404(
             Receipt,
             pk=pk,
             business=business,
         )
     else:
+        # Client user: strictly client's own receipt
         receipt = get_object_or_404(
             Receipt,
             pk=pk,
@@ -83,14 +91,17 @@ def receipt_detail(request, pk):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def receipt_pdf(request, pk):
-    business = get_user_business(request.user)
-    if business:
+    is_admin = is_admin_user(request.user)
+    business = get_user_business(request.user) if is_admin else None
+
+    if is_admin:
         receipt = get_object_or_404(
             Receipt.objects.select_related("business", "invoice", "payment", "invoice__client"),
             pk=pk,
             business=business,
         )
     else:
+        # Client user: strictly client's own receipt PDF
         receipt = get_object_or_404(
             Receipt.objects.select_related("business", "invoice", "payment", "invoice__client"),
             pk=pk,

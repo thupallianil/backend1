@@ -23,6 +23,10 @@ from .serializers import TicketSerializer, TicketMessageSerializer
 User = get_user_model()
 
 
+def is_admin_user(user):
+    return bool(user.is_staff or user.is_superuser)
+
+
 def get_user_business(user):
     return BusinessProfile.objects.filter(owner=user).first()
 
@@ -54,20 +58,20 @@ def generate_ticket_number(business):
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def ticket_list(request):
     user = request.user
-    role = getattr(user, "role", "").upper()
+    admin = is_admin_user(user)
 
     if request.method == "GET":
-        if role == "CLIENT":
-            # Filter tickets where client matches user's email
+        if not admin:
+            # Client view: find all tickets linked to this client email or created by this user
             tickets = Ticket.objects.filter(
-                client__email__iexact=user.email
-            ).select_related("client", "business", "created_by").prefetch_related("messages")
+                Q(client__email__iexact=user.email) | Q(created_by=user)
+            ).select_related("client", "business", "created_by").prefetch_related("messages").order_by("-created_at")
         else:
             # Admin view: all tickets for business
             business = get_or_create_business(user)
             tickets = Ticket.objects.filter(
                 business=business
-            ).select_related("client", "business", "created_by").prefetch_related("messages")
+            ).select_related("client", "business", "created_by").prefetch_related("messages").order_by("-created_at")
 
         # Query filters
         status_filter = request.query_params.get("status")
@@ -99,7 +103,7 @@ def ticket_list(request):
         })
 
     # -------------------------------------------------------- POST (Create Ticket)
-    data = request.data.copy()
+    data = request.data
     subject = str(data.get("subject") or "").strip()
     description = str(data.get("description") or "").strip()
     category = str(data.get("category") or "general").strip()
@@ -119,23 +123,28 @@ def ticket_list(request):
         }, status=status.HTTP_400_BAD_REQUEST)
 
     with transaction.atomic():
-        if role == "CLIENT":
-            # Find matching client record for this user
+        if not admin:
+            # Client raised ticket
             client = Client.objects.filter(email__iexact=user.email).first()
-            if not client:
-                # Find default business or first active business
-                business = BusinessProfile.objects.first()
+            if client:
+                business = client.business
+            else:
+                # Fallback to the active admin business profile
+                business = (
+                    BusinessProfile.objects.filter(owner__is_staff=True).first()
+                    or BusinessProfile.objects.first()
+                )
                 if not business:
                     owner_user = User.objects.filter(is_staff=True).first() or user
                     business = get_or_create_business(owner_user)
+
                 client = Client.objects.create(
                     business=business,
-                    name=user.get_full_name() or user.username or "Client User",
+                    name=user.get_full_name() or user.first_name or user.username or "Client User",
                     email=user.email,
                 )
-            else:
-                business = client.business
         else:
+            # Admin raised ticket
             business = get_or_create_business(user)
             client_id = data.get("client") or data.get("client_id")
             if client_id:
@@ -165,7 +174,16 @@ def ticket_list(request):
             last_reply_at=timezone.now(),
         )
 
-        # Notify the Admin / Business Owner
+        # Also create initial message record
+        TicketMessage.objects.create(
+            ticket=ticket,
+            sender=user,
+            sender_role="client" if not admin else "admin",
+            message=description,
+            attachment=attachment,
+        )
+
+        # Notify the Admin / Business Owner if client raised it
         admin_user = business.owner
         if admin_user and admin_user != user:
             Notification.objects.create(
@@ -194,13 +212,13 @@ def ticket_list(request):
 @permission_classes([IsAuthenticated])
 def ticket_detail(request, pk):
     user = request.user
-    role = getattr(user, "role", "").upper()
+    admin = is_admin_user(user)
 
-    if role == "CLIENT":
+    if not admin:
         ticket = get_object_or_404(
             Ticket.objects.select_related("client", "business", "created_by").prefetch_related("messages"),
+            Q(client__email__iexact=user.email) | Q(created_by=user),
             pk=pk,
-            client__email__iexact=user.email,
         )
     else:
         business = get_or_create_business(user)
@@ -236,7 +254,7 @@ def ticket_detail(request, pk):
         ticket.save()
 
         # If status changed by Admin, notify the Client
-        if role != "CLIENT" and "status" in data and old_status != ticket.status:
+        if admin and "status" in data and old_status != ticket.status:
             client_user = User.objects.filter(email__iexact=ticket.client.email).first()
             if client_user:
                 status_label = ticket.status.replace("_", " ").title()
@@ -258,7 +276,7 @@ def ticket_detail(request, pk):
 
     # -------------------------------------------------------- DELETE
     if request.method == "DELETE":
-        if role == "CLIENT":
+        if not admin:
             return Response({
                 "success": False,
                 "message": "Only administrators can delete tickets.",
@@ -281,10 +299,14 @@ def ticket_detail(request, pk):
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def ticket_reply(request, pk):
     user = request.user
-    role = getattr(user, "role", "").upper()
+    admin = is_admin_user(user)
 
-    if role == "CLIENT":
-        ticket = get_object_or_404(Ticket, pk=pk, client__email__iexact=user.email)
+    if not admin:
+        ticket = get_object_or_404(
+            Ticket,
+            Q(client__email__iexact=user.email) | Q(created_by=user),
+            pk=pk,
+        )
         sender_role = "client"
     else:
         business = get_or_create_business(user)
@@ -301,7 +323,7 @@ def ticket_reply(request, pk):
         }, status=status.HTTP_400_BAD_REQUEST)
 
     with transaction.atomic():
-        msg = TicketMessage.objects.create(
+        TicketMessage.objects.create(
             ticket=ticket,
             sender=user,
             sender_role=sender_role,

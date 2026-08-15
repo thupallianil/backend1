@@ -14,17 +14,83 @@ from api.models import (
 )
 from api.reports.services import ReportService
 
+def is_admin_user(user):
+    return bool(user.is_staff or user.is_superuser)
+
+
 def get_business(user):
-    return get_object_or_404(
-        BusinessProfile,
-        owner=user,
-    )
+    return BusinessProfile.objects.filter(owner=user).first()
 
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def dashboard(request):
+    is_admin = is_admin_user(request.user)
+
+    if not is_admin:
+        # Strictly individual client dashboard
+        user_email = request.user.email
+        invoices = Invoice.objects.filter(client__email__iexact=user_email)
+        payments = Payment.objects.filter(invoice__client__email__iexact=user_email)
+        quotes = Quote.objects.filter(client__email__iexact=user_email)
+
+        total_paid = (
+            payments.filter(status=Payment.Status.SUCCESS).aggregate(
+                total=Sum("amount")
+            )["total"]
+            or 0
+        )
+
+        total_pending = (
+            invoices.exclude(status=Invoice.Status.PAID).aggregate(
+                total=Sum("balance_due")
+            )["total"]
+            or 0
+        )
+
+        return Response({
+            "success": True,
+            "data": {
+                "invoices": invoices.count(),
+                "paid_invoices": invoices.filter(status=Invoice.Status.PAID).count(),
+                "pending_invoices": invoices.filter(
+                    status__in=[Invoice.Status.SENT, Invoice.Status.PARTIALLY_PAID]
+                ).count(),
+                "quotes": quotes.count(),
+                "total_paid": total_paid,
+                "pending_amount": total_pending,
+                "recent_invoices": [
+                    {
+                        "id": i.id,
+                        "invoice_number": i.invoice_number,
+                        "total": i.total,
+                        "status": i.status,
+                        "issue_date": i.issue_date,
+                        "due_date": i.due_date,
+                    }
+                    for i in invoices.order_by("-created_at")[:5]
+                ],
+                "recent_payments": [
+                    {
+                        "id": p.id,
+                        "invoice": p.invoice.invoice_number if p.invoice else "",
+                        "amount": p.amount,
+                        "method": p.method,
+                        "status": p.status,
+                        "created_at": p.created_at,
+                    }
+                    for p in payments.order_by("-created_at")[:5]
+                ],
+            }
+        })
+
     business = get_business(request.user)
+    if not business:
+        business = BusinessProfile.objects.create(
+            owner=request.user,
+            business_name=f"{request.user.username}'s Business",
+            email=request.user.email,
+        )
 
     invoices = Invoice.objects.filter(
         business=business
