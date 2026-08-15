@@ -40,20 +40,20 @@ DEBUG = (
 # ALLOWED HOSTS
 # ============================================================
 
-ALLOWED_HOSTS = [
-    "localhost",
-    "127.0.0.1",
-]
+env_hosts = os.environ.get("ALLOWED_HOSTS", "")
+if env_hosts:
+    ALLOWED_HOSTS = [h.strip() for h in env_hosts.split(",") if h.strip()]
+else:
+    ALLOWED_HOSTS = [
+        "*",
+        "localhost",
+        "127.0.0.1",
+    ]
 
-# Render provides this automatically.
-render_host = os.environ.get(
-    "RENDER_EXTERNAL_HOSTNAME"
-)
-
-if render_host:
-    ALLOWED_HOSTS.append(
-        render_host
-    )
+# Render / Railway hostnames
+render_host = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+if render_host and render_host not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(render_host)
 
 
 # ============================================================
@@ -501,21 +501,22 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:8080",
 ]
 
+# Allow all origins for seamless cloud deployment (Render, Vercel, Railway, etc.)
+CORS_ALLOW_ALL_ORIGINS = True
+
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://.*\.vercel\.app$",
+    r"^https://.*\.onrender\.com$",
+    r"^https://.*\.railway\.app$",
+]
 
 # ------------------------------------------------------------
 # VERCEL FRONTEND
 # ------------------------------------------------------------
 
-vercel_frontend_url = os.environ.get(
-    "FRONTEND_URL"
-)
-
+vercel_frontend_url = os.environ.get("FRONTEND_URL")
 if vercel_frontend_url:
-
-    CORS_ALLOWED_ORIGINS.append(
-        vercel_frontend_url.rstrip("/")
-    )
-
+    CORS_ALLOWED_ORIGINS.append(vercel_frontend_url.rstrip("/"))
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -532,23 +533,14 @@ CORS_URLS_REGEX = r"^/api/.*$"
 # ============================================================
 
 CORS_ALLOW_HEADERS = [
-
     "accept",
-
     "accept-encoding",
-
     "authorization",
-
     "content-type",
-
     "dnt",
-
     "origin",
-
     "user-agent",
-
     "x-csrftoken",
-
     "x-requested-with",
 ]
 
@@ -558,17 +550,11 @@ CORS_ALLOW_HEADERS = [
 # ============================================================
 
 CORS_ALLOW_METHODS = [
-
     "DELETE",
-
     "GET",
-
     "OPTIONS",
-
     "PATCH",
-
     "POST",
-
     "PUT",
 ]
 
@@ -578,32 +564,21 @@ CORS_ALLOW_METHODS = [
 # ============================================================
 
 CSRF_TRUSTED_ORIGINS = [
-
-    # --------------------------------------------------------
-    # LOCAL
-    # --------------------------------------------------------
-
     "http://localhost:5173",
     "http://localhost:5174",
     "http://localhost:5175",
     "http://localhost:5176",
-
     "http://127.0.0.1:5173",
     "http://127.0.0.1:5174",
     "http://127.0.0.1:5175",
     "http://127.0.0.1:5176",
+    "https://*.vercel.app",
+    "https://*.onrender.com",
+    "https://*.railway.app",
 ]
 
-
-# ------------------------------------------------------------
-# VERCEL FRONTEND CSRF ORIGIN
-# ------------------------------------------------------------
-
 if vercel_frontend_url:
-
-    CSRF_TRUSTED_ORIGINS.append(
-        vercel_frontend_url.rstrip("/")
-    )
+    CSRF_TRUSTED_ORIGINS.append(vercel_frontend_url.rstrip("/"))
 
 
 # ============================================================
