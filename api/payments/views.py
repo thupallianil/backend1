@@ -256,8 +256,8 @@ def create_payment_order(request):
         settings_obj = AppSettings.objects.filter(business=business).first()
         payment_settings = settings_obj.payment_settings if settings_obj else {}
         
-        key_id = payment_settings.get("razorpayKeyId")
-        key_secret = payment_settings.get("razorpaySecretKey")
+        key_id = str(payment_settings.get("razorpayKeyId") or "").strip() or None
+        key_secret = str(payment_settings.get("razorpaySecretKey") or "").strip() or None
         
         gateway = get_razorpay_gateway(key_id=key_id, key_secret=key_secret)
         order = gateway.create_order(

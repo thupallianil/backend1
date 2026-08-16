@@ -20,17 +20,23 @@ class RazorpayGateway:
     """
 
     def __init__(self, key_id=None, key_secret=None):
-        self.key_id = key_id or getattr(
-            settings,
-            "RAZORPAY_KEY_ID",
-            "",
-        )
+        self.key_id = str(
+            key_id
+            or getattr(
+                settings,
+                "RAZORPAY_KEY_ID",
+                "",
+            )
+        ).strip()
 
-        self.key_secret = key_secret or getattr(
-            settings,
-            "RAZORPAY_KEY_SECRET",
-            "",
-        )
+        self.key_secret = str(
+            key_secret
+            or getattr(
+                settings,
+                "RAZORPAY_KEY_SECRET",
+                "",
+            )
+        ).strip()
 
         if not self.key_id:
             raise ValueError(
