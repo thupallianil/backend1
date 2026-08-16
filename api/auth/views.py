@@ -324,13 +324,37 @@ def forgot_password(request):
         email__iexact=email
     ).first()
 
-    # Do not reveal whether an account exists.
+    reset_url = None
+    if user:
+        uid = urlsafe_base64_encode(force_bytes(user.pk))
+        token = default_token_generator.make_token(user)
+        
+        frontend_url = os.environ.get("FRONTEND_URL", "https://frontend-gray-nu-88.vercel.app").rstrip("/")
+        reset_url = f"{frontend_url}/reset-password?uid={uid}&token={token}"
+
+        try:
+            from django.core.mail import send_mail
+            subject = "Password Reset Instructions"
+            message = (
+                f"Hello {user.get_full_name() or user.username},\n\n"
+                f"You recently requested to reset your password.\n"
+                f"Please click the link below to set a new password:\n\n"
+                f"{reset_url}\n\n"
+                f"If you did not make this request, you can safely ignore this email.\n\n"
+                f"Regards,\nSupport Team"
+            )
+            from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@ultrakeyit.com")
+            send_mail(subject, message, from_email, [email], fail_silently=True)
+        except Exception as e:
+            logger.warning("Failed to send password reset email: %s", str(e))
+
     return Response({
         "success": True,
-        "message": "If the email exists, password reset instructions can be sent.",
+        "message": "If the email exists in our system, password reset instructions have been sent.",
         "data": {
             "email": email,
             "user_found": bool(user),
+            "reset_url": reset_url if getattr(settings, "DEBUG", False) else None,
         },
     })
 
