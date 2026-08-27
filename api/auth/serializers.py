@@ -7,6 +7,28 @@ from api.models import BusinessProfile, AppSettings
 User = get_user_model()
 
 
+DISPOSABLE_EMAIL_DOMAINS = {
+    "mailinator.com",
+    "tempmail.com",
+    "temp-mail.org",
+    "10minutemail.com",
+    "guerrillamail.com",
+    "trashmail.com",
+    "trashmail.net",
+    "yopmail.com",
+    "yopmail.fr",
+    "throwawaymail.com",
+    "sharklasers.com",
+    "getairmail.com",
+    "dispostable.com",
+    "fakeinbox.com",
+    "mohmal.com",
+    "tempail.com",
+    "burnermail.io",
+    "nada.ltd",
+}
+
+
 class RegisterSerializer(serializers.Serializer):
     username = serializers.CharField(
         max_length=150,
@@ -32,8 +54,11 @@ class RegisterSerializer(serializers.Serializer):
     )
 
     def validate_email(self, value):
+        import socket
+
         value = value.strip().lower()
 
+        # Check existing user
         if User.objects.filter(
             email__iexact=value
         ).exists():
@@ -41,7 +66,26 @@ class RegisterSerializer(serializers.Serializer):
                 "This email is already registered. Please log in instead."
             )
 
+        # Check domain validity
+        if "@" in value:
+            domain = value.split("@")[-1].strip()
+
+            # 1. Block known disposable/throwaway domains
+            if domain in DISPOSABLE_EMAIL_DOMAINS:
+                raise serializers.ValidationError(
+                    "Temporary or disposable email addresses are not allowed. Please use a valid email."
+                )
+
+            # 2. Verify domain exists via live DNS
+            try:
+                socket.gethostbyname(domain)
+            except Exception:
+                raise serializers.ValidationError(
+                    f"The domain '@{domain}' is invalid or does not exist. Please enter a real email address."
+                )
+
         return value
+
 
     def validate(self, attrs):
         if attrs["password"] != attrs["password_confirm"]:

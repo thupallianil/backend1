@@ -1,11 +1,14 @@
+import os
 import uuid
+import logging
 import requests
 
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.tokens import default_token_generator
 from django.db import transaction
-from django.utils.http import urlsafe_base64_decode
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 
 from rest_framework import status
 from rest_framework.decorators import (
@@ -21,6 +24,9 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.models import BusinessProfile, AppSettings
+
+logger = logging.getLogger(__name__)
+
 
 
 from .serializers import (
@@ -148,15 +154,19 @@ def login(request):
 
     if requested_role:
         if requested_role != actual_role:
+            target_portal = "Admin" if actual_role == "admin" else "Client"
+            current_portal = "Admin" if requested_role == "admin" else "Client"
             return Response(
                 {
                     "success": False,
-                    "message": "Selected role does not match this account.",
+                    "message": f"This account is registered as a {target_portal}. You cannot login through the {current_portal} portal. Please switch to the {target_portal} login tab.",
+                    "role": actual_role,
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
 
     tokens = token_data(authenticated_user)
+
 
     return Response({
         "success": True,
@@ -511,7 +521,20 @@ def google_auth(request):
     # Find or provision user
     user = User.objects.filter(email__iexact=email).first()
 
-    if not user:
+    if user:
+        actual_role = get_user_role(user)
+        if role and role != actual_role:
+            target_portal = "Admin" if actual_role == "admin" else "Client"
+            current_portal = "Admin" if role == "admin" else "Client"
+            return Response(
+                {
+                    "success": False,
+                    "message": f"This Google account is registered as a {target_portal}. You cannot login through the {current_portal} portal. Please switch to the {target_portal} login tab.",
+                    "role": actual_role,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+    else:
         unique_username = f"google_{email.split('@')[0]}_{uuid.uuid4().hex[:6]}"
 
         with transaction.atomic():
@@ -535,6 +558,7 @@ def google_auth(request):
             AppSettings.objects.get_or_create(business=business)
 
     tokens = token_data(user)
+
 
     return Response(
         {
