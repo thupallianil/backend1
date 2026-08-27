@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from api.models import (
     BusinessProfile,
     Client,
+    Vendor,
     Invoice,
     Payment,
     Quote,
@@ -105,6 +106,15 @@ def dashboard(request):
         "data": {
             "clients": Client.objects.filter(
                 business=business
+            ).count(),
+
+            "vendors": Vendor.objects.filter(
+                business=business
+            ).count(),
+
+            "active_vendors": Vendor.objects.filter(
+                business=business,
+                is_active=True
             ).count(),
 
             "invoices": invoices.count(),
@@ -262,6 +272,11 @@ def search(request):
         (Q(name__icontains=query) | Q(company_name__icontains=query) | Q(email__icontains=query))
     )[:5]
 
+    vendors = Vendor.objects.filter(
+        Q(business=business) &
+        (Q(name__icontains=query) | Q(company_name__icontains=query) | Q(email__icontains=query) | Q(category__icontains=query))
+    )[:5]
+
     invoices = Invoice.objects.filter(
         Q(business=business) &
         (Q(invoice_number__icontains=query) | Q(client__name__icontains=query) | Q(client__company_name__icontains=query))
@@ -280,6 +295,14 @@ def search(request):
             "type": "client",
             "title": client.name or client.company_name,
             "subtitle": client.email,
+        })
+
+    for vendor in vendors:
+        results.append({
+            "id": vendor.id,
+            "type": "vendor",
+            "title": vendor.company_name or vendor.name,
+            "subtitle": f"{vendor.get_category_display()} • {vendor.email or vendor.phone or 'Vendor'}",
         })
 
     for invoice in invoices:

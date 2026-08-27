@@ -1252,3 +1252,154 @@ class Notification(TimeStampedModel):
 
     def __str__(self):
         return f"Notification for {self.user.username}: {self.title}"
+
+
+# ============================================================
+# VENDOR
+# ============================================================
+
+class Vendor(TimeStampedModel):
+
+    class Category(models.TextChoices):
+        GOODS = "goods", "Goods & Materials"
+        SERVICES = "services", "Services & Consulting"
+        RAW_MATERIALS = "raw_materials", "Raw Materials"
+        LOGISTICS = "logistics", "Logistics & Shipping"
+        UTILITIES = "utilities", "Utilities & Rent"
+        IT_SOFTWARE = "it_software", "IT & Software"
+        CONTRACTOR = "contractor", "Contractor & Freelance"
+        EQUIPMENT = "equipment", "Machinery & Equipment"
+        OTHER = "other", "Other"
+
+    business = models.ForeignKey(
+        BusinessProfile,
+        on_delete=models.CASCADE,
+        related_name="vendors",
+    )
+
+    name = models.CharField(
+        max_length=255,
+    )
+
+    company_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+
+    email = models.EmailField(
+        blank=True,
+        default="",
+    )
+
+    phone = models.CharField(
+        max_length=30,
+        blank=True,
+        default="",
+    )
+
+    category = models.CharField(
+        max_length=50,
+        choices=Category.choices,
+        default=Category.GOODS,
+    )
+
+    tax_number = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+    )
+
+    pan_number = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+    )
+
+    address = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    city = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+    )
+
+    state = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+    )
+
+    country = models.CharField(
+        max_length=100,
+        default="India",
+    )
+
+    postal_code = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+    )
+
+    website = models.URLField(
+        blank=True,
+        default="",
+    )
+
+    bank_name = models.CharField(
+        max_length=150,
+        blank=True,
+        default="",
+    )
+
+    account_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+
+    account_number = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+    )
+
+    ifsc_code = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+    )
+
+    upi_id = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+    )
+
+    payment_terms = models.CharField(
+        max_length=50,
+        blank=True,
+        default="Net 30",
+    )
+
+    notes = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    is_active = models.BooleanField(
+        default=True,
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["business", "category"]),
+            models.Index(fields=["business", "is_active"]),
+        ]
+
+    def __str__(self):
+        return self.company_name or self.name
