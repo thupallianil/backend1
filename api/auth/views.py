@@ -125,52 +125,82 @@ def request_signup_otp(request):
     Validates registration details without creating the user account.
     Generates a 6-digit OTP and sends it to the user's email.
     """
-    serializer = RegisterSerializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
+    try:
+        serializer = RegisterSerializer(data=request.data)
+        if not serializer.is_valid():
+            first_err = "Validation failed."
+            for field, err_list in serializer.errors.items():
+                if isinstance(err_list, list) and len(err_list) > 0:
+                    first_err = f"{err_list[0]}"
+                    break
+                elif isinstance(err_list, str):
+                    first_err = err_list
+                    break
+            return Response(
+                {
+                    "success": False,
+                    "message": first_err,
+                    "errors": serializer.errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-    validated = serializer.validated_data
-    email = validated["email"].strip().lower()
-    username = validated["username"].strip()
-    password = validated["password"]
-    role = validated.get("role", "client")
+        validated = serializer.validated_data
+        email = validated["email"].strip().lower()
+        username = validated.get("username", email.split("@")[0]).strip()
+        password = validated["password"]
+        role = validated.get("role", "client")
 
-    # Generate 6-digit OTP
-    otp = f"{random.randint(100000, 999999):06d}"
-    expires_at = timezone.now() + timedelta(minutes=10)
+        # Generate 6-digit OTP
+        otp = f"{random.randint(100000, 999999):06d}"
+        expires_at = timezone.now() + timedelta(minutes=10)
 
-    # Clear any old OTP records for this email
-    SignupVerificationOTP.objects.filter(email__iexact=email).delete()
+        # Clear any old OTP records for this email
+        SignupVerificationOTP.objects.filter(email__iexact=email).delete()
 
-    # Store pending signup data temporarily
-    company_name = str(request.data.get("company_name", "")).strip()
-    SignupVerificationOTP.objects.create(
-        email=email,
-        otp=otp,
-        temp_data={
-            "username": username,
-            "email": email,
-            "password": password,
-            "role": role,
-            "company_name": company_name or f"{username}'s Business",
-        },
-        expires_at=expires_at,
-        attempts=0,
-    )
-
-    # Send verification email
-    send_otp_email(email, otp, username)
-
-    return Response(
-        {
-            "success": True,
-            "message": f"Verification code sent to {email}.",
-            "email": email,
-            "data": {
+        # Store pending signup data temporarily
+        company_name = str(request.data.get("company_name", "")).strip()
+        SignupVerificationOTP.objects.create(
+            email=email,
+            otp=otp,
+            temp_data={
+                "username": username,
                 "email": email,
+                "password": password,
+                "role": role,
+                "company_name": company_name or f"{username}'s Business",
             },
-        },
-        status=status.HTTP_200_OK,
-    )
+            expires_at=expires_at,
+            attempts=0,
+        )
+
+        # Send verification email safely
+        try:
+            send_otp_email(email, otp, username)
+        except Exception as mail_err:
+            logger.error(f"Error calling send_otp_email: {mail_err}")
+
+        return Response(
+            {
+                "success": True,
+                "message": f"Verification code sent to {email}.",
+                "email": email,
+                "data": {
+                    "email": email,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+    except Exception as e:
+        logger.exception("Unexpected error in request_signup_otp")
+        return Response(
+            {
+                "success": False,
+                "message": f"Registration request failed: {str(e)}",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
 
 
 # ============================================================
