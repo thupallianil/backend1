@@ -74,12 +74,13 @@ def public_platform_stats(request):
         total_quotes = Quote.objects.count()
         
         # Real-time invoice volume
-        volume_agg = Invoice.objects.aggregate(Sum("total_amount"))
-        total_volume = float(volume_agg["total_amount__sum"] or 0)
+        volume_agg = Invoice.objects.aggregate(Sum("total"))
+        total_volume = float(volume_agg["total__sum"] or 0)
         
         # Real-time paid volume
-        paid_agg = Invoice.objects.filter(status="paid").aggregate(Sum("total_amount"))
-        total_paid_volume = float(paid_agg["total_amount__sum"] or 0)
+        paid_agg = Invoice.objects.filter(status="paid").aggregate(Sum("paid_amount"))
+        total_paid_volume = float(paid_agg["paid_amount__sum"] or 0)
+
 
         return Response({
             "success": True,

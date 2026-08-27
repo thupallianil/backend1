@@ -33,6 +33,15 @@ class RegisterSerializer(serializers.Serializer):
     username = serializers.CharField(
         max_length=150,
         trim_whitespace=True,
+        required=False,
+        allow_blank=True,
+    )
+
+    name = serializers.CharField(
+        max_length=150,
+        trim_whitespace=True,
+        required=False,
+        allow_blank=True,
     )
 
     email = serializers.EmailField()
@@ -47,10 +56,10 @@ class RegisterSerializer(serializers.Serializer):
         min_length=8,
     )
 
-    role = serializers.ChoiceField(
-        choices=["admin", "client"],
+    role = serializers.CharField(
         default="client",
         required=False,
+        allow_blank=True,
     )
 
     def validate_email(self, value):
@@ -68,7 +77,7 @@ class RegisterSerializer(serializers.Serializer):
 
         # Check domain validity
         if "@" in value:
-            domain = value.split("@")[-1].strip()
+            domain = value.split("@")[-1].strip().lower()
 
             # 1. Block known disposable/throwaway domains
             if domain in DISPOSABLE_EMAIL_DOMAINS:
@@ -76,12 +85,10 @@ class RegisterSerializer(serializers.Serializer):
                     "Temporary or disposable email addresses are not allowed. Please use a valid email."
                 )
 
-            # 2. Verify domain exists via live DNS
-            try:
-                socket.gethostbyname(domain)
-            except Exception:
+            # 2. Verify domain format
+            if "." not in domain or len(domain.split(".")[-1]) < 2:
                 raise serializers.ValidationError(
-                    f"The domain '@{domain}' is invalid or does not exist. Please enter a real email address."
+                    f"The domain '@{domain}' is invalid. Please enter a real email address."
                 )
 
         return value
@@ -93,7 +100,18 @@ class RegisterSerializer(serializers.Serializer):
                 "password_confirm": "Passwords do not match."
             })
 
+        # Normalize username from name if not given
+        if not attrs.get("username"):
+            attrs["username"] = (attrs.get("name") or attrs["email"].split("@")[0]).strip()
+
+        # Normalize role
+        role_val = str(attrs.get("role") or "client").strip().lower()
+        if role_val not in ["admin", "client"]:
+            role_val = "client"
+        attrs["role"] = role_val
+
         return attrs
+
 
     def create(self, validated_data):
         import uuid
@@ -142,11 +160,18 @@ class LoginSerializer(serializers.Serializer):
         write_only=True,
     )
 
-    role = serializers.ChoiceField(
-        choices=["admin", "client"],
+    role = serializers.CharField(
         required=False,
         allow_blank=True,
     )
+
+    def validate_role(self, value):
+        if value:
+            v = str(value).strip().lower()
+            if v in ["admin", "client"]:
+                return v
+        return None
+
 
 
 class UserResponseSerializer(serializers.Serializer):
@@ -215,16 +240,18 @@ class ChangePasswordSerializer(serializers.Serializer):
 
     new_password = serializers.CharField(
         write_only=True,
-        min_length=8,
+        min_length=6,
     )
 
     new_password_confirm = serializers.CharField(
         write_only=True,
-        min_length=8,
+        min_length=6,
+        required=False,
     )
 
     def validate(self, attrs):
-        if attrs["new_password"] != attrs["new_password_confirm"]:
+        confirm = attrs.get("new_password_confirm")
+        if confirm and attrs["new_password"] != confirm:
             raise serializers.ValidationError({
                 "new_password_confirm": "Passwords do not match."
             })
@@ -235,6 +262,7 @@ class ChangePasswordSerializer(serializers.Serializer):
             })
 
         return attrs
+
 
 
 class ForgotPasswordSerializer(serializers.Serializer):
@@ -270,8 +298,16 @@ class GoogleAuthSerializer(serializers.Serializer):
         allow_blank=False,
         help_text="Google ID token (credential) obtained from Google Identity Services",
     )
-    role = serializers.ChoiceField(
-        choices=["admin", "client"],
+    role = serializers.CharField(
         default="client",
         required=False,
-    )
+        allow_blank=True,
+    )
+
+    def validate_role(self, value):
+        if value:
+            v = str(value).strip().lower()
+            if v in ["admin", "client"]:
+                return v
+        return "client"
+

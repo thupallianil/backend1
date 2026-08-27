@@ -1435,6 +1435,10 @@ class SignupVerificationOTP(TimeStampedModel):
             models.Index(fields=["email", "expires_at"]),
         ]
 
+    @property
+    def otp_code(self):
+        return self.otp
+
     def __str__(self):
         return f"OTP for {self.email} ({self.otp})"
 
@@ -1461,7 +1465,12 @@ class PasswordResetOTP(TimeStampedModel):
             models.Index(fields=["email", "expires_at"]),
         ]
 
+    @property
+    def otp_code(self):
+        return self.otp
+
     def __str__(self):
         return f"Reset OTP for {self.email} ({self.otp})"
+
 
 

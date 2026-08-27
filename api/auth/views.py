@@ -142,6 +142,7 @@ def request_signup_otp(request):
     SignupVerificationOTP.objects.filter(email__iexact=email).delete()
 
     # Store pending signup data temporarily
+    company_name = str(request.data.get("company_name", "")).strip()
     SignupVerificationOTP.objects.create(
         email=email,
         otp=otp,
@@ -150,6 +151,7 @@ def request_signup_otp(request):
             "email": email,
             "password": password,
             "role": role,
+            "company_name": company_name or f"{username}'s Business",
         },
         expires_at=expires_at,
         attempts=0,
@@ -163,6 +165,9 @@ def request_signup_otp(request):
             "success": True,
             "message": f"Verification code sent to {email}.",
             "email": email,
+            "data": {
+                "email": email,
+            },
         },
         status=status.HTTP_200_OK,
     )
@@ -221,7 +226,7 @@ def verify_signup_otp(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Verify code match
+    # Validate OTP code
     if otp_record.otp.strip() != otp:
         otp_record.attempts += 1
         otp_record.save()
@@ -229,36 +234,26 @@ def verify_signup_otp(request):
         return Response(
             {
                 "success": False,
-                "message": f"Invalid verification code. Please check your email. ({remaining} attempts remaining)",
+                "message": f"Invalid verification code. ({remaining} attempts remaining)",
             },
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # OTP is VALID: Atomically create the user account in DB
-    temp = otp_record.temp_data
-    username = temp.get("username", email.split("@")[0]).strip()
-    raw_password = temp.get("password")
-    role = temp.get("role", "client")
+    # Valid OTP verified -> Create User and BusinessProfile atomically
+    temp_data = otp_record.temp_data or {}
+    username = temp_data.get("username", email.split("@")[0]).strip()
+    password = temp_data.get("password")
+    role = temp_data.get("role", "client")
+    company_name = temp_data.get("company_name") or f"{username}'s Business"
 
-    # Double-check email is not registered during the wait time
-    if User.objects.filter(email__iexact=email).exists():
-        otp_record.delete()
-        return Response(
-            {
-                "success": False,
-                "message": "This email has already been registered. Please log in.",
-            },
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    # Ensure username is unique for Django auth_user table
+    # Generate unique username
     unique_username = f"{username}_{uuid.uuid4().hex[:6]}"
 
     with transaction.atomic():
         user = User.objects.create_user(
             username=unique_username,
             email=email,
-            password=raw_password,
+            password=password,
             first_name=username,
             is_staff=(role == "admin"),
             is_superuser=(role == "admin"),
@@ -267,10 +262,11 @@ def verify_signup_otp(request):
         business, _ = BusinessProfile.objects.get_or_create(
             owner=user,
             defaults={
-                "business_name": f"{username}'s Business",
+                "business_name": company_name,
                 "email": user.email,
             },
         )
+
 
         AppSettings.objects.get_or_create(
             business=business,
@@ -281,8 +277,6 @@ def verify_signup_otp(request):
 
     tokens = token_data(user)
 
-
-
     return Response(
         {
             "success": True,
@@ -292,6 +286,8 @@ def verify_signup_otp(request):
             "data": {
                 "user": user_data(user),
                 "tokens": tokens,
+                "access": tokens["access"],
+                "refresh": tokens["refresh"],
             },
         },
         status=status.HTTP_201_CREATED,
@@ -457,8 +453,11 @@ def login(request):
         "data": {
             "user": user_data(authenticated_user),
             "tokens": tokens,
+            "access": tokens["access"],
+            "refresh": tokens["refresh"],
         },
     })
+
 
 
 # ============================================================
@@ -477,7 +476,15 @@ def me(request):
                 user.first_name = name_val
         if "email" in data:
             email_val = str(data.get("email") or "").strip().lower()
-            if email_val and not User.objects.filter(email__iexact=email_val).exclude(pk=user.pk).exists():
+            if email_val:
+                if User.objects.filter(email__iexact=email_val).exclude(pk=user.pk).exists():
+                    return Response(
+                        {
+                            "success": False,
+                            "message": "This email address is already in use by another account.",
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
                 user.email = email_val
         user.save()
 
@@ -572,9 +579,24 @@ def change_password(request):
         data=request.data
     )
 
-    serializer.is_valid(
-        raise_exception=True
-    )
+    if not serializer.is_valid():
+        first_err = "Invalid password data provided."
+        for field, err_list in serializer.errors.items():
+            if isinstance(err_list, list) and len(err_list) > 0:
+                first_err = f"{err_list[0]}"
+                break
+            elif isinstance(err_list, str):
+                first_err = err_list
+                break
+
+        return Response(
+            {
+                "success": False,
+                "message": first_err,
+                "errors": serializer.errors,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     user = request.user
 
@@ -584,7 +606,7 @@ def change_password(request):
         return Response(
             {
                 "success": False,
-                "message": "Current password is incorrect.",
+                "message": "Current password is incorrect. Please enter your existing password.",
             },
             status=status.HTTP_400_BAD_REQUEST,
         )
@@ -601,6 +623,7 @@ def change_password(request):
         "success": True,
         "message": "Password changed successfully.",
     })
+
 
 
 # ============================================================
@@ -630,7 +653,7 @@ def forgot_password(request):
                 "success": False,
                 "message": "No account found with this email address. Please check your email or sign up.",
             },
-            status=status.HTTP_404_NOT_FOUND,
+            status=status.HTTP_400_BAD_REQUEST,
         )
 
     # 1. Generate 6-digit OTP code
@@ -729,8 +752,9 @@ def resend_password_reset_otp(request):
                 "success": False,
                 "message": "No account found with this email address.",
             },
-            status=status.HTTP_404_NOT_FOUND,
+            status=status.HTTP_400_BAD_REQUEST,
         )
+
 
     new_otp = f"{random.randint(100000, 999999):06d}"
     expires_at = timezone.now() + timedelta(minutes=10)
@@ -1032,7 +1056,10 @@ def google_auth(request):
             "data": {
                 "user": user_data(user),
                 "tokens": tokens,
+                "access": tokens["access"],
+                "refresh": tokens["refresh"],
             },
         },
         status=status.HTTP_200_OK,
-    )
+    )
+
