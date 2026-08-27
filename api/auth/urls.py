@@ -12,6 +12,7 @@ from .views import (
     logout,
     change_password,
     forgot_password,
+    resend_password_reset_otp,
     reset_password,
 )
 
@@ -91,8 +92,14 @@ urlpatterns = [
     ),
 
     path(
+        "forgot-password/resend-otp/",
+        resend_password_reset_otp,
+        name="auth-forgot-password-resend-otp",
+    ),
+
+    path(
         "reset-password/",
         reset_password,
         name="auth-reset-password",
     ),
-]
+]

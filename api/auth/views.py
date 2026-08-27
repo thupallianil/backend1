@@ -27,7 +27,8 @@ from rest_framework.response import Response
 
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.models import BusinessProfile, AppSettings, SignupVerificationOTP
+from api.models import BusinessProfile, AppSettings, SignupVerificationOTP, PasswordResetOTP
+
 
 logger = logging.getLogger(__name__)
 
@@ -603,7 +604,7 @@ def change_password(request):
 
 
 # ============================================================
-# FORGOT PASSWORD
+# FORGOT PASSWORD (OTP & LINK GENERATION)
 # ============================================================
 
 @api_view(["POST"])
@@ -623,101 +624,283 @@ def forgot_password(request):
         email__iexact=email
     ).first()
 
-    reset_url = None
-    if user:
-        uid = urlsafe_base64_encode(force_bytes(user.pk))
-        token = default_token_generator.make_token(user)
-        
-        frontend_url = os.environ.get("FRONTEND_URL", "https://frontend-gray-nu-88.vercel.app").rstrip("/")
-        reset_url = f"{frontend_url}/reset-password?uid={uid}&token={token}"
+    if not user:
+        return Response(
+            {
+                "success": False,
+                "message": "No account found with this email address. Please check your email or sign up.",
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
 
-        try:
-            from django.core.mail import send_mail
-            subject = "Password Reset Instructions"
-            message = (
-                f"Hello {user.get_full_name() or user.username},\n\n"
-                f"You recently requested to reset your password.\n"
-                f"Please click the link below to set a new password:\n\n"
-                f"{reset_url}\n\n"
-                f"If you did not make this request, you can safely ignore this email.\n\n"
-                f"Regards,\nSupport Team"
-            )
-            from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@ultrakeyit.com")
-            send_mail(subject, message, from_email, [email], fail_silently=True)
-        except Exception as e:
-            logger.warning("Failed to send password reset email: %s", str(e))
+    # 1. Generate 6-digit OTP code
+    otp = f"{random.randint(100000, 999999):06d}"
+    expires_at = timezone.now() + timedelta(minutes=10)
+
+    # Clear old reset OTPs
+    PasswordResetOTP.objects.filter(email__iexact=email).delete()
+
+    PasswordResetOTP.objects.create(
+        email=email,
+        otp=otp,
+        expires_at=expires_at,
+        attempts=0,
+    )
+
+    # 2. Generate backup reset link
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    token = default_token_generator.make_token(user)
+    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+    reset_url = f"{frontend_url}/reset-password?uid={uid}&token={token}"
+
+    # 3. Send styled email
+    subject = f"{otp} is your password reset code"
+    plain_message = (
+        f"Hello {user.get_full_name() or user.username},\n\n"
+        f"You recently requested to reset your password.\n\n"
+        f"Your 6-digit verification code is:\n\n"
+        f"{otp}\n\n"
+        f"This code will expire in 10 minutes.\n\n"
+        f"Alternatively, you can reset your password directly using this link:\n"
+        f"{reset_url}\n\n"
+        f"If you did not request a password reset, please ignore this email.\n\n"
+        f"Regards,\nInvoiceFlow Support Team"
+    )
+
+    html_message = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0;">
+        <div style="text-align: center; margin-bottom: 20px;">
+            <h2 style="color: #0f172a; margin: 0; font-size: 22px; font-weight: 800;">Password Reset Request</h2>
+            <p style="color: #64748b; font-size: 13px; margin-top: 6px;">Use the verification code below to reset your account password.</p>
+        </div>
+        <div style="background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 20px; text-align: center; margin: 20px 0;">
+            <span style="font-family: monospace; font-size: 36px; font-weight: 900; letter-spacing: 8px; color: #2563eb;">{otp}</span>
+            <p style="color: #94a3b8; font-size: 11px; margin-top: 8px; margin-bottom: 0;">Code expires in 10 minutes</p>
+        </div>
+        <p style="color: #64748b; font-size: 12px; line-height: 1.5;">If you did not request a password reset, please ignore this message. Your account remains secure.</p>
+        <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 20px 0;" />
+        <p style="color: #94a3b8; font-size: 11px; text-align: center; margin: 0;">&copy; InvoiceFlow Cloud Enterprise. All rights reserved.</p>
+    </div>
+    """
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None) or "no-reply@invoiceflow.com"
+
+    try:
+        send_mail(subject, plain_message, from_email, [email], html_message=html_message, fail_silently=False)
+        logger.info(f"Password reset email sent to {email}")
+    except Exception as e:
+        logger.warning(f"SMTP note for password reset {email}: {e}")
+
+    # Always log OTP in console so testing is never blocked
+    print(f"\n=======================================================\n[PASSWORD RESET OTP] Sent to: {email} | CODE: {otp}\nReset URL: {reset_url}\n=======================================================\n")
 
     return Response({
         "success": True,
-        "message": "If the email exists in our system, password reset instructions have been sent.",
+        "message": f"Password reset verification code sent to {email}.",
         "data": {
             "email": email,
-            "user_found": bool(user),
+            "user_found": True,
             "reset_url": reset_url if getattr(settings, "DEBUG", False) else None,
         },
     })
 
 
 # ============================================================
-# RESET PASSWORD
+# RESEND PASSWORD RESET OTP
+# ============================================================
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def resend_password_reset_otp(request):
+    email = str(request.data.get("email", "")).strip().lower()
+
+    if not email:
+        return Response(
+            {
+                "success": False,
+                "message": "Email is required.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    user = User.objects.filter(email__iexact=email).first()
+    if not user:
+        return Response(
+            {
+                "success": False,
+                "message": "No account found with this email address.",
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    new_otp = f"{random.randint(100000, 999999):06d}"
+    expires_at = timezone.now() + timedelta(minutes=10)
+
+    otp_record, _ = PasswordResetOTP.objects.get_or_create(email=email, defaults={"otp": new_otp, "expires_at": expires_at})
+    otp_record.otp = new_otp
+    otp_record.expires_at = expires_at
+    otp_record.attempts = 0
+    otp_record.save()
+
+    subject = f"{new_otp} is your new password reset code"
+    plain_message = f"Hello {user.get_full_name() or user.username},\n\nYour new password reset verification code is:\n\n{new_otp}\n\nValid for 10 minutes."
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None) or "no-reply@invoiceflow.com"
+
+    try:
+        send_mail(subject, plain_message, from_email, [email], fail_silently=False)
+    except Exception as e:
+        logger.warning(f"SMTP note on resend: {e}")
+
+    print(f"\n=======================================================\n[PASSWORD RESET OTP RESENT] Sent to: {email} | CODE: {new_otp}\n=======================================================\n")
+
+    return Response({
+        "success": True,
+        "message": f"New verification code sent to {email}.",
+    })
+
+
+# ============================================================
+# RESET PASSWORD (OTP OR LINK TOKEN)
 # ============================================================
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def reset_password(request):
-    serializer = ResetPasswordSerializer(
-        data=request.data
-    )
+    data = request.data or {}
+    email = str(data.get("email", "")).strip().lower()
+    otp = str(data.get("otp", "")).strip()
+    uid = data.get("uid")
+    token = data.get("token")
+    password = data.get("password")
+    password_confirm = data.get("password_confirm")
 
-    serializer.is_valid(
-        raise_exception=True
-    )
-
-    uid = serializer.validated_data["uid"]
-    token = serializer.validated_data["token"]
-
-    try:
-        uid_value = urlsafe_base64_decode(
-            uid
-        ).decode()
-
-        user = User.objects.get(
-            pk=uid_value
-        )
-
-    except Exception:
+    if not password:
         return Response(
             {
                 "success": False,
-                "message": "Invalid password reset request.",
+                "message": "New password is required.",
             },
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    if not default_token_generator.check_token(
-        user,
-        token,
-    ):
+    if len(password) < 8:
         return Response(
             {
                 "success": False,
-                "message": "Invalid or expired password reset token.",
+                "message": "Password must be at least 8 characters.",
             },
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    user.set_password(
-        serializer.validated_data["password"]
+    if password_confirm and password != password_confirm:
+        return Response(
+            {
+                "success": False,
+                "message": "Passwords do not match.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # 1. OTP-Based Verification Flow
+    if otp and email:
+        otp_record = PasswordResetOTP.objects.filter(email__iexact=email).order_by("-created_at").first()
+
+        if not otp_record:
+            return Response(
+                {
+                    "success": False,
+                    "message": "No active password reset request found. Please request a new code.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if timezone.now() > otp_record.expires_at:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Verification code has expired. Please request a new code.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if otp_record.attempts >= 5:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Too many failed attempts. Please request a new code.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if otp_record.otp.strip() != otp:
+            otp_record.attempts += 1
+            otp_record.save()
+            remaining = 5 - otp_record.attempts
+            return Response(
+                {
+                    "success": False,
+                    "message": f"Invalid verification code. ({remaining} attempts remaining)",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = User.objects.filter(email__iexact=email).first()
+        if not user:
+            return Response(
+                {
+                    "success": False,
+                    "message": "User account not found.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        user.set_password(password)
+        user.save(update_fields=["password"])
+        otp_record.delete()
+
+        return Response({
+            "success": True,
+            "message": "Password reset successfully! You can now log in with your new password.",
+        })
+
+    # 2. Token-Based Verification Flow (from email link)
+    if uid and token:
+        try:
+            uid_value = urlsafe_base64_decode(uid).decode()
+            user = User.objects.get(pk=uid_value)
+        except Exception:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Invalid password reset request link.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not default_token_generator.check_token(user, token):
+            return Response(
+                {
+                    "success": False,
+                    "message": "Invalid or expired password reset token.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user.set_password(password)
+        user.save(update_fields=["password"])
+
+        return Response({
+            "success": True,
+            "message": "Password reset successfully! You can now log in with your new password.",
+        })
+
+    return Response(
+        {
+            "success": False,
+            "message": "Please provide the 6-digit verification code or a valid reset token.",
+        },
+        status=status.HTTP_400_BAD_REQUEST,
     )
 
-    user.save(
-        update_fields=["password"]
-    )
-
-    return Response({
-        "success": True,
-        "message": "Password reset successfully.",
-    })
 
 
 # ============================================================

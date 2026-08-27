@@ -1406,7 +1406,7 @@ class Vendor(TimeStampedModel):
 
 
 # ============================================================
-# SIGNUP EMAIL VERIFICATION OTP
+# SIGNUP & PASSWORD RESET EMAIL VERIFICATION OTP
 # ============================================================
 
 class SignupVerificationOTP(TimeStampedModel):
@@ -1437,4 +1437,31 @@ class SignupVerificationOTP(TimeStampedModel):
 
     def __str__(self):
         return f"OTP for {self.email} ({self.otp})"
+
+
+class PasswordResetOTP(TimeStampedModel):
+    email = models.EmailField(
+        db_index=True,
+    )
+
+    otp = models.CharField(
+        max_length=6,
+    )
+
+    expires_at = models.DateTimeField()
+
+    attempts = models.PositiveSmallIntegerField(
+        default=0,
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["email", "otp"]),
+            models.Index(fields=["email", "expires_at"]),
+        ]
+
+    def __str__(self):
+        return f"Reset OTP for {self.email} ({self.otp})"
+
 
