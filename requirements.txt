@@ -33,3 +33,4 @@ razorpay==2.0.1
 reportlab==5.0.0
 python-dotenv==1.2.2
 gunicorn==23.0.0
+google-auth>=2.0.0

@@ -218,3 +218,16 @@ class ResetPasswordSerializer(serializers.Serializer):
             })
 
         return attrs
+
+
+class GoogleAuthSerializer(serializers.Serializer):
+    credential = serializers.CharField(
+        required=True,
+        allow_blank=False,
+        help_text="Google ID token (credential) obtained from Google Identity Services",
+    )
+    role = serializers.ChoiceField(
+        choices=["admin", "client"],
+        default="client",
+        required=False,
+    )

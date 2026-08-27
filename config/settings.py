@@ -647,9 +647,19 @@ RAZORPAY_WEBHOOK_SECRET = os.environ.get(
 
 
 # ============================================================
+# GOOGLE OAUTH CONFIGURATION
+# ============================================================
+
+GOOGLE_CLIENT_ID = os.environ.get(
+    "GOOGLE_CLIENT_ID",
+    "",
+)
+
+
+# ============================================================
 # DEFAULT PRIMARY KEY
 # ============================================================
 
 DEFAULT_AUTO_FIELD = (
     "django.db.models.BigAutoField"
-)
+)

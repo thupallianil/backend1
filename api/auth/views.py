@@ -1,5 +1,10 @@
+import uuid
+import requests
+
+from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.tokens import default_token_generator
+from django.db import transaction
 from django.utils.http import urlsafe_base64_decode
 
 from rest_framework import status
@@ -15,9 +20,13 @@ from rest_framework.response import Response
 
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from api.models import BusinessProfile, AppSettings
+
+
 from .serializers import (
     RegisterSerializer,
     LoginSerializer,
+    GoogleAuthSerializer,
     RefreshTokenInputSerializer,
     ChangePasswordSerializer,
     ForgotPasswordSerializer,
@@ -419,3 +428,124 @@ def reset_password(request):
         "success": True,
         "message": "Password reset successfully.",
     })
+
+
+# ============================================================
+# GOOGLE OAUTH
+# ============================================================
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def google_auth(request):
+    """
+    Verifies Google ID token from frontend, finds or provisions the User,
+    and returns application SimpleJWT access & refresh tokens.
+    """
+    serializer = GoogleAuthSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    token = serializer.validated_data["credential"]
+    role = serializer.validated_data.get("role", "client")
+    google_client_id = getattr(settings, "GOOGLE_CLIENT_ID", "").strip()
+
+    try:
+        # Verify token with Google's tokeninfo endpoint
+        resp = requests.get(
+            "https://oauth2.googleapis.com/tokeninfo",
+            params={"id_token": token},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            err_data = {}
+            try:
+                err_data = resp.json()
+            except Exception:
+                pass
+            err_msg = err_data.get("error_description") or err_data.get("error") or "Invalid Google token."
+            return Response(
+                {
+                    "success": False,
+                    "message": f"Google token verification failed: {err_msg}",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        id_info = resp.json()
+
+        # If GOOGLE_CLIENT_ID is configured in settings, verify audience matches
+        if google_client_id and id_info.get("aud") != google_client_id:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Google token was not issued for this application client ID.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    except Exception as exc:
+        return Response(
+            {
+                "success": False,
+                "message": f"Google token verification error: {str(exc)}",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+    email = id_info.get("email", "").strip().lower()
+    if not email:
+        return Response(
+            {
+                "success": False,
+                "message": "Google account does not contain a verified email address.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    full_name = (id_info.get("name") or "").strip()
+    given_name = (id_info.get("given_name") or "").strip()
+    family_name = (id_info.get("family_name") or "").strip()
+
+    display_name = full_name or given_name or email.split("@")[0]
+
+    # Find or provision user
+    user = User.objects.filter(email__iexact=email).first()
+
+    if not user:
+        unique_username = f"google_{email.split('@')[0]}_{uuid.uuid4().hex[:6]}"
+
+        with transaction.atomic():
+            user = User.objects.create_user(
+                username=unique_username,
+                email=email,
+                first_name=given_name or display_name,
+                last_name=family_name,
+                is_staff=(role == "admin"),
+            )
+            user.set_unusable_password()
+            user.save()
+
+            business, _ = BusinessProfile.objects.get_or_create(
+                owner=user,
+                defaults={
+                    "business_name": f"{display_name}'s Business",
+                    "email": email,
+                },
+            )
+            AppSettings.objects.get_or_create(business=business)
+
+    tokens = token_data(user)
+
+    return Response(
+        {
+            "success": True,
+            "message": "Google authentication successful.",
+            "access": tokens["access"],
+            "refresh": tokens["refresh"],
+            "data": {
+                "user": user_data(user),
+                "tokens": tokens,
+            },
+        },
+        status=status.HTTP_200_OK,
+    )

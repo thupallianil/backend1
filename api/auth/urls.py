@@ -3,6 +3,7 @@ from django.urls import path
 from .views import (
     register,
     login,
+    google_auth,
     me,
     refresh,
     logout,
@@ -29,6 +30,12 @@ urlpatterns = [
         "login/",
         login,
         name="auth-login",
+    ),
+
+    path(
+        "google/",
+        google_auth,
+        name="auth-google",
     ),
 
     path(
