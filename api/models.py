@@ -1402,4 +1402,39 @@ class Vendor(TimeStampedModel):
         ]
 
     def __str__(self):
-        return self.company_name or self.name
+        return self.company_name or self.name
+
+
+# ============================================================
+# SIGNUP EMAIL VERIFICATION OTP
+# ============================================================
+
+class SignupVerificationOTP(TimeStampedModel):
+    email = models.EmailField(
+        db_index=True,
+    )
+
+    otp = models.CharField(
+        max_length=6,
+    )
+
+    temp_data = models.JSONField(
+        default=dict,
+    )
+
+    expires_at = models.DateTimeField()
+
+    attempts = models.PositiveSmallIntegerField(
+        default=0,
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["email", "otp"]),
+            models.Index(fields=["email", "expires_at"]),
+        ]
+
+    def __str__(self):
+        return f"OTP for {self.email} ({self.otp})"
+

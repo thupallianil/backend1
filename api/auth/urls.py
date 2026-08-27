@@ -2,6 +2,9 @@ from django.urls import path
 
 from .views import (
     register,
+    request_signup_otp,
+    verify_signup_otp,
+    resend_signup_otp,
     login,
     google_auth,
     me,
@@ -25,6 +28,25 @@ urlpatterns = [
         register,
         name="auth-register",
     ),
+
+    path(
+        "register/request-otp/",
+        request_signup_otp,
+        name="auth-request-signup-otp",
+    ),
+
+    path(
+        "register/verify-otp/",
+        verify_signup_otp,
+        name="auth-verify-signup-otp",
+    ),
+
+    path(
+        "register/resend-otp/",
+        resend_signup_otp,
+        name="auth-resend-signup-otp",
+    ),
+
 
     path(
         "login/",

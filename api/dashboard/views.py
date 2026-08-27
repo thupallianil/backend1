@@ -155,34 +155,88 @@ def dashboard(request):
                     "company_name": c.company_name,
                     "email": c.email,
                     "invoice_count": Invoice.objects.filter(client=c).count(),
-                    "outstanding": Invoice.objects.filter(client=c).exclude(status=Invoice.Status.PAID).aggregate(total=Sum("balance_due"))["total"] or 0,
+                    "total_billed": (
+                        Invoice.objects.filter(client=c).aggregate(total=Sum("total"))["total"] or 0
+                    ),
+                    "outstanding": (
+                        Invoice.objects.filter(client=c)
+                        .exclude(status=Invoice.Status.PAID)
+                        .aggregate(total=Sum("balance_due"))["total"]
+                        or 0
+                    ),
                 }
-                for c in Client.objects.filter(business=business).order_by("-created_at")[:5]
+                for c in Client.objects.filter(business=business).order_by("-created_at")[:6]
+            ],
+
+            "recent_vendors": [
+                {
+                    "id": v.id,
+                    "name": v.name,
+                    "company_name": v.company_name or v.name,
+                    "email": v.email,
+                    "phone": v.phone,
+                    "category": v.get_category_display() if hasattr(v, "get_category_display") else "Supplier",
+                    "terms": "Net 30",
+                    "due_amount": 0,
+                }
+                for v in Vendor.objects.filter(business=business).order_by("-created_at")[:6]
+            ],
+
+            "urgent_items": [
+                {
+                    "id": f"inv-{i.id}",
+                    "type": "overdue_invoice" if i.status == Invoice.Status.OVERDUE else "pending_invoice",
+                    "title": f"Invoice: #{i.invoice_number}",
+                    "entity": i.client.name if i.client else "Client",
+                    "amount": float(i.balance_due or i.total or 0),
+                    "days_overdue": 1 if i.status == Invoice.Status.OVERDUE else 0,
+                    "status": i.status,
+                    "due_date": str(i.due_date) if i.due_date else "",
+                    "action_label": "Remind Client",
+                    "action_link": f"/admin/invoices/{i.id}",
+                }
+                for i in invoices.filter(
+                    status__in=[Invoice.Status.OVERDUE, Invoice.Status.SENT, Invoice.Status.PARTIALLY_PAID]
+                ).order_by("-created_at")[:5]
+            ] + [
+                {
+                    "id": f"quo-{q.id}",
+                    "type": "pending_quote",
+                    "title": f"Quotation: #{q.quote_number}",
+                    "entity": q.client.name if q.client else "Client",
+                    "amount": float(q.total or 0),
+                    "days_overdue": 0,
+                    "status": q.status,
+                    "due_date": str(q.valid_until) if hasattr(q, "valid_until") and q.valid_until else "",
+                    "action_label": "Follow Up",
+                    "action_link": f"/admin/quotes/{q.id}",
+                }
+                for q in Quote.objects.filter(business=business, status=Quote.Status.SENT).order_by("-created_at")[:3]
             ],
 
             "recent_invoices": [
                 {
                     "id": i.id,
                     "invoice_number": i.invoice_number,
-                    "client": i.client.name,
+                    "client": i.client.name if i.client else "Unknown Client",
                     "total": i.total,
                     "status": i.status,
                     "issue_date": i.issue_date,
                     "due_date": i.due_date,
                 }
-                for i in invoices.order_by("-created_at")[:5]
+                for i in invoices.order_by("-created_at")[:6]
             ],
 
             "recent_payments": [
                 {
                     "id": p.id,
-                    "invoice": p.invoice.invoice_number,
+                    "invoice": p.invoice.invoice_number if p.invoice else "Direct",
                     "amount": p.amount,
                     "method": p.method,
                     "status": p.status,
                     "created_at": p.created_at,
                 }
-                for p in payments.order_by("-created_at")[:5]
+                for p in payments.order_by("-created_at")[:6]
             ],
             
             "revenue_chart": [
@@ -196,6 +250,7 @@ def dashboard(request):
             "payment_chart": ReportService.payments(request.user).get("months", []),
         },
     })
+
 
 
 @api_view(["GET"])

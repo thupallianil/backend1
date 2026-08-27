@@ -1,12 +1,16 @@
 import os
 import uuid
+import random
 import logging
 import requests
+from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.tokens import default_token_generator
+from django.core.mail import send_mail
 from django.db import transaction
+from django.utils import timezone
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 
@@ -23,10 +27,50 @@ from rest_framework.response import Response
 
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.models import BusinessProfile, AppSettings
+from api.models import BusinessProfile, AppSettings, SignupVerificationOTP
 
 logger = logging.getLogger(__name__)
 
+
+def send_otp_email(email, otp, name="User"):
+    subject = f"{otp} is your verification code"
+    plain_message = (
+        f"Hello {name},\n\n"
+        f"Your verification code to complete your registration is:\n\n"
+        f"{otp}\n\n"
+        f"This code is valid for 10 minutes. If you did not request this, please ignore this email.\n"
+    )
+    html_message = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0;">
+        <div style="text-align: center; margin-bottom: 20px;">
+            <h2 style="color: #0f172a; margin: 0; font-size: 22px; font-weight: 800;">Verify Your Email Address</h2>
+            <p style="color: #64748b; font-size: 13px; margin-top: 6px;">Thank you for registering. Please use the 6-digit verification code below to activate your account.</p>
+        </div>
+        <div style="background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 20px; text-align: center; margin: 20px 0;">
+            <span style="font-family: monospace; font-size: 36px; font-weight: 900; letter-spacing: 8px; color: #2563eb;">{otp}</span>
+            <p style="color: #94a3b8; font-size: 11px; margin-top: 8px; margin-bottom: 0;">Code expires in 10 minutes</p>
+        </div>
+        <p style="color: #64748b; font-size: 12px; line-height: 1.5;">If you did not request this registration, you can safely ignore this email.</p>
+        <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 20px 0;" />
+        <p style="color: #94a3b8; font-size: 11px; text-align: center; margin: 0;">&copy; InvoiceFlow Cloud Enterprise. All rights reserved.</p>
+    </div>
+    """
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None) or "no-reply@invoiceflow.com"
+    try:
+        send_mail(
+            subject=subject,
+            message=plain_message,
+            from_email=from_email,
+            recipient_list=[email],
+            html_message=html_message,
+            fail_silently=False,
+        )
+        logger.info(f"Verification OTP email dispatched to {email}")
+    except Exception as e:
+        logger.warning(f"SMTP dispatch note for {email}: {e}")
+    
+    # Always log OTP in console so development & local testing are seamless
+    print(f"\n=======================================================\n[EMAIL VERIFICATION OTP] Sent to: {email} | CODE: {otp}\n=======================================================\n")
 
 
 from .serializers import (
@@ -70,7 +114,242 @@ def token_data(user):
 
 
 # ============================================================
-# REGISTER
+# STEP 1: REQUEST SIGNUP OTP
+# ============================================================
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def request_signup_otp(request):
+    """
+    Validates registration details without creating the user account.
+    Generates a 6-digit OTP and sends it to the user's email.
+    """
+    serializer = RegisterSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    validated = serializer.validated_data
+    email = validated["email"].strip().lower()
+    username = validated["username"].strip()
+    password = validated["password"]
+    role = validated.get("role", "client")
+
+    # Generate 6-digit OTP
+    otp = f"{random.randint(100000, 999999):06d}"
+    expires_at = timezone.now() + timedelta(minutes=10)
+
+    # Clear any old OTP records for this email
+    SignupVerificationOTP.objects.filter(email__iexact=email).delete()
+
+    # Store pending signup data temporarily
+    SignupVerificationOTP.objects.create(
+        email=email,
+        otp=otp,
+        temp_data={
+            "username": username,
+            "email": email,
+            "password": password,
+            "role": role,
+        },
+        expires_at=expires_at,
+        attempts=0,
+    )
+
+    # Send verification email
+    send_otp_email(email, otp, username)
+
+    return Response(
+        {
+            "success": True,
+            "message": f"Verification code sent to {email}.",
+            "email": email,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+# ============================================================
+# STEP 2: VERIFY SIGNUP OTP & CREATE ACCOUNT
+# ============================================================
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def verify_signup_otp(request):
+    """
+    Verifies the 6-digit OTP. If and only if correct, creates the user account in the database.
+    """
+    email = str(request.data.get("email", "")).strip().lower()
+    otp = str(request.data.get("otp", "")).strip()
+
+    if not email or not otp:
+        return Response(
+            {
+                "success": False,
+                "message": "Both email and 6-digit verification code are required.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    otp_record = SignupVerificationOTP.objects.filter(email__iexact=email).order_by("-created_at").first()
+
+    if not otp_record:
+        return Response(
+            {
+                "success": False,
+                "message": "No pending registration found for this email. Please submit the sign-up form again.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Check expiration
+    if timezone.now() > otp_record.expires_at:
+        return Response(
+            {
+                "success": False,
+                "message": "Verification code has expired. Please request a new code.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Check attempts
+    if otp_record.attempts >= 5:
+        return Response(
+            {
+                "success": False,
+                "message": "Too many failed attempts. Please request a new verification code.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Verify code match
+    if otp_record.otp.strip() != otp:
+        otp_record.attempts += 1
+        otp_record.save()
+        remaining = 5 - otp_record.attempts
+        return Response(
+            {
+                "success": False,
+                "message": f"Invalid verification code. Please check your email. ({remaining} attempts remaining)",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # OTP is VALID: Atomically create the user account in DB
+    temp = otp_record.temp_data
+    username = temp.get("username", email.split("@")[0]).strip()
+    raw_password = temp.get("password")
+    role = temp.get("role", "client")
+
+    # Double-check email is not registered during the wait time
+    if User.objects.filter(email__iexact=email).exists():
+        otp_record.delete()
+        return Response(
+            {
+                "success": False,
+                "message": "This email has already been registered. Please log in.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Ensure username is unique for Django auth_user table
+    unique_username = f"{username}_{uuid.uuid4().hex[:6]}"
+
+    with transaction.atomic():
+        user = User.objects.create_user(
+            username=unique_username,
+            email=email,
+            password=raw_password,
+            first_name=username,
+            is_staff=(role == "admin"),
+            is_superuser=(role == "admin"),
+        )
+
+        business, _ = BusinessProfile.objects.get_or_create(
+            owner=user,
+            defaults={
+                "business_name": f"{username}'s Business",
+                "email": user.email,
+            },
+        )
+
+        AppSettings.objects.get_or_create(
+            business=business,
+        )
+
+        # Cleanup OTP record
+        otp_record.delete()
+
+    tokens = token_data(user)
+
+
+
+    return Response(
+        {
+            "success": True,
+            "message": "Email verified successfully! Account created.",
+            "access": tokens["access"],
+            "refresh": tokens["refresh"],
+            "data": {
+                "user": user_data(user),
+                "tokens": tokens,
+            },
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
+# ============================================================
+# RESEND SIGNUP OTP
+# ============================================================
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def resend_signup_otp(request):
+    """
+    Resends a new 6-digit verification code to the email.
+    """
+    email = str(request.data.get("email", "")).strip().lower()
+
+    if not email:
+        return Response(
+            {
+                "success": False,
+                "message": "Email is required.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    otp_record = SignupVerificationOTP.objects.filter(email__iexact=email).order_by("-created_at").first()
+
+    if not otp_record:
+        return Response(
+            {
+                "success": False,
+                "message": "No pending registration found for this email. Please sign up again.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Generate fresh OTP
+    new_otp = f"{random.randint(100000, 999999):06d}"
+    otp_record.otp = new_otp
+    otp_record.expires_at = timezone.now() + timedelta(minutes=10)
+    otp_record.attempts = 0
+    otp_record.save()
+
+    username = otp_record.temp_data.get("username", "User")
+    send_otp_email(email, new_otp, username)
+
+    return Response(
+        {
+            "success": True,
+            "message": f"New verification code sent to {email}.",
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+# ============================================================
+# LEGACY / DIRECT REGISTER (Fallback)
 # ============================================================
 
 @api_view(["POST"])
@@ -101,6 +380,7 @@ def register(request):
         },
         status=status.HTTP_201_CREATED,
     )
+
 
 
 # ============================================================
