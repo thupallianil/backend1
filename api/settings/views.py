@@ -154,6 +154,21 @@ def settings_data(settings_obj):
             "cashReceiptNote":      payment_st.get("cashReceiptNote",      ""),
             "cashInstructions":     payment_st.get("cashInstructions",     ""),
         },
+        "payment": {
+            "currency":             settings_obj.currency                  or "",
+            "currencySymbol":       payment_st.get("currencySymbol",       ""),
+            "onlineEnabled":        settings_obj.online_payment_enabled,
+            "razorpayEnabled":      payment_st.get("razorpayEnabled",      False),
+            "razorpayKeyId":        payment_st.get("razorpayKeyId",        ""),
+            "upiEnabled":           payment_st.get("upiEnabled",           False),
+            "upiId":                payment_st.get("upiId",                ""),
+            "bankTransferEnabled":  payment_st.get("bankTransferEnabled",  False),
+            "bankName":             payment_st.get("bankName",             ""),
+            "accountName":          payment_st.get("accountName",          ""),
+            "accountNumber":        payment_st.get("accountNumber",        ""),
+            "ifscCode":             payment_st.get("ifscCode",             payment_st.get("ifsc", "")),
+        },
+
 
         # -------------------------------------------------- EMAILS
         "emails": {
