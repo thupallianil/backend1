@@ -303,6 +303,11 @@ class GoogleAuthSerializer(serializers.Serializer):
         required=False,
         allow_blank=True,
     )
+    mode = serializers.CharField(
+        default="login",
+        required=False,
+        allow_blank=True,
+    )
 
     def validate_role(self, value):
         if value:
@@ -310,4 +315,12 @@ class GoogleAuthSerializer(serializers.Serializer):
             if v in ["admin", "client"]:
                 return v
         return "client"
+
+    def validate_mode(self, value):
+        if value:
+            v = str(value).strip().lower()
+            if v in ["login", "signup", "register"]:
+                return "signup" if v in ["signup", "register"] else "login"
+        return "login"
+
 

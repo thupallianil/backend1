@@ -99,6 +99,9 @@ def user_data(user):
         "id": user.id,
         "username": user.username,
         "email": user.email,
+        "name": user.get_full_name() or user.first_name or user.username,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
         "is_staff": user.is_staff,
         "is_superuser": user.is_superuser,
         "role": get_user_role(user),
@@ -973,6 +976,7 @@ def google_auth(request):
 
     token = serializer.validated_data["credential"]
     role = serializer.validated_data.get("role", "client")
+    mode = serializer.validated_data.get("mode", "login")
     google_client_id = getattr(settings, "GOOGLE_CLIENT_ID", "").strip()
 
     try:
@@ -1018,7 +1022,6 @@ def google_auth(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-
     email = id_info.get("email", "").strip().lower()
     if not email:
         return Response(
@@ -1035,10 +1038,31 @@ def google_auth(request):
 
     display_name = full_name or given_name or email.split("@")[0]
 
-    # Find or provision user
+    # Look up existing user
     user = User.objects.filter(email__iexact=email).first()
 
-    if user:
+    # ============================================================
+    # MODE 1: LOGIN (Only existing users allowed)
+    # ============================================================
+    if mode == "login":
+        if not user:
+            return Response(
+                {
+                    "success": False,
+                    "message": "No registered account found with this Google email. Please sign up to create your account first.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not user.is_active:
+            return Response(
+                {
+                    "success": False,
+                    "message": "This account is inactive. Please contact support.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         actual_role = get_user_role(user)
         if role and role != actual_role:
             target_portal = "Admin" if actual_role == "admin" else "Client"
@@ -1051,7 +1075,48 @@ def google_auth(request):
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
+
+        # Update profile names if previously blank
+        updated_fields = []
+        if not user.first_name and (given_name or display_name):
+            user.first_name = given_name or display_name
+            updated_fields.append("first_name")
+        if not user.last_name and family_name:
+            user.last_name = family_name
+            updated_fields.append("last_name")
+        if updated_fields:
+            user.save(update_fields=updated_fields)
+
+        tokens = token_data(user)
+        return Response(
+            {
+                "success": True,
+                "message": f"Welcome back, {user.first_name or user.username}!",
+                "access": tokens["access"],
+                "refresh": tokens["refresh"],
+                "data": {
+                    "user": user_data(user),
+                    "tokens": tokens,
+                    "access": tokens["access"],
+                    "refresh": tokens["refresh"],
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    # ============================================================
+    # MODE 2: SIGNUP / REGISTER (Create new user and initialize profile)
+    # ============================================================
     else:
+        if user:
+            return Response(
+                {
+                    "success": False,
+                    "message": "An account with this Google email already exists. Please sign in instead.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         unique_username = f"google_{email.split('@')[0]}_{uuid.uuid4().hex[:6]}"
 
         with transaction.atomic():
@@ -1061,35 +1126,35 @@ def google_auth(request):
                 first_name=given_name or display_name,
                 last_name=family_name,
                 is_staff=(role == "admin"),
+                is_superuser=(role == "admin"),
             )
             user.set_unusable_password()
             user.save()
 
-            business, _ = BusinessProfile.objects.get_or_create(
-                owner=user,
-                defaults={
-                    "business_name": f"{display_name}'s Business",
-                    "email": email,
-                },
-            )
-            AppSettings.objects.get_or_create(business=business)
+            if role == "admin":
+                business, _ = BusinessProfile.objects.get_or_create(
+                    owner=user,
+                    defaults={
+                        "business_name": f"{display_name}'s Business",
+                        "email": email,
+                    },
+                )
+                AppSettings.objects.get_or_create(business=business)
 
-    tokens = token_data(user)
-
-
-    return Response(
-        {
-            "success": True,
-            "message": "Google authentication successful.",
-            "access": tokens["access"],
-            "refresh": tokens["refresh"],
-            "data": {
-                "user": user_data(user),
-                "tokens": tokens,
+        tokens = token_data(user)
+        return Response(
+            {
+                "success": True,
+                "message": f"Account created successfully! Welcome, {user.first_name}!",
                 "access": tokens["access"],
                 "refresh": tokens["refresh"],
+                "data": {
+                    "user": user_data(user),
+                    "tokens": tokens,
+                    "access": tokens["access"],
+                    "refresh": tokens["refresh"],
+                },
             },
-        },
-        status=status.HTTP_200_OK,
-    )
+            status=status.HTTP_201_CREATED,
+        )
 
