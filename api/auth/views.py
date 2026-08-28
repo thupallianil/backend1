@@ -666,36 +666,19 @@ def refresh(request):
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def logout(request):
-    serializer = LogoutInputSerializer(
-        data=request.data
-    )
-
-    serializer.is_valid(
-        raise_exception=True
-    )
-
-    refresh_token = serializer.validated_data["refresh"]
-
     try:
-        token = RefreshToken(
-            refresh_token
-        )
-
-        token.blacklist()
-
-        return Response({
-            "success": True,
-            "message": "Logged out successfully.",
-        })
-
+        data = request.data or {}
+        refresh_token = data.get("refresh") or data.get("refresh_token")
+        if refresh_token:
+            token = RefreshToken(refresh_token)
+            token.blacklist()
     except Exception:
-        return Response(
-            {
-                "success": False,
-                "message": "Invalid refresh token.",
-            },
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+        pass
+
+    return Response({
+        "success": True,
+        "message": "Logged out successfully.",
+    }, status=status.HTTP_200_OK)
 
 
 # ============================================================
