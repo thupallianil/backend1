@@ -667,9 +667,10 @@ EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "").strip()
 EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True").lower() in ("true", "1", "yes")
 EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "False").lower() in ("true", "1", "yes")
 EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", 5))
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "InvoiceFlow <no-reply@invoiceflow.com>")
+is_placeholder_user = not EMAIL_HOST_USER or "yourgmail" in EMAIL_HOST_USER.lower() or "example.com" in EMAIL_HOST_USER.lower()
+is_placeholder_pass = not EMAIL_HOST_PASSWORD or "your-gmail" in EMAIL_HOST_PASSWORD.lower() or "app-password" in EMAIL_HOST_PASSWORD.lower()
 
-if EMAIL_HOST:
+if EMAIL_HOST and not is_placeholder_user and not is_placeholder_pass:
     EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 else:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
