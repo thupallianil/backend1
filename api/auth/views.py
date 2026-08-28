@@ -234,12 +234,17 @@ def request_signup_otp(request):
         # Dispatch verification email
         send_otp_email(email, otp, username, purpose="signup")
 
+        is_console_backend = getattr(settings, "EMAIL_BACKEND", "").endswith("console.EmailBackend") or getattr(settings, "DEBUG", False)
+        debug_otp = otp if is_console_backend else None
+
         return Response(
             {
                 "success": True,
-                "message": f"Verification code sent to {email}.",
+                "message": f"Verification code sent to {email}." if not debug_otp else f"Verification code sent! (Testing code: {otp})",
+                "otp": debug_otp,
                 "data": {
                     "email": email,
+                    "otp": debug_otp,
                 },
             },
             status=status.HTTP_200_OK,
@@ -450,12 +455,17 @@ def resend_signup_otp(request):
     username = otp_record.temp_data.get("username", "User")
     send_otp_email(email, new_otp, username, purpose="signup")
 
+    is_console_backend = getattr(settings, "EMAIL_BACKEND", "").endswith("console.EmailBackend") or getattr(settings, "DEBUG", False)
+    debug_otp = new_otp if is_console_backend else None
+
     return Response(
         {
             "success": True,
-            "message": "A new verification code has been sent.",
+            "message": "A new verification code has been sent." if not debug_otp else f"New verification code sent! (Testing code: {new_otp})",
+            "otp": debug_otp,
             "data": {
                 "email": email,
+                "otp": debug_otp,
             },
         },
         status=status.HTTP_200_OK,
@@ -774,11 +784,16 @@ def forgot_password(request):
     # Send password reset email
     send_otp_email(email, otp, user.get_full_name() or user.username, purpose="reset")
 
+    is_console_backend = getattr(settings, "EMAIL_BACKEND", "").endswith("console.EmailBackend") or getattr(settings, "DEBUG", False)
+    debug_otp = otp if is_console_backend else None
+
     return Response({
         "success": True,
-        "message": f"Password reset verification code sent to {email}.",
+        "message": f"Password reset verification code sent to {email}." if not debug_otp else f"Password reset code: {otp}",
+        "otp": debug_otp,
         "data": {
             "email": email,
+            "otp": debug_otp,
         },
     })
 
@@ -844,11 +859,16 @@ def resend_password_reset_otp(request):
 
     send_otp_email(email, new_otp, user.get_full_name() or user.username, purpose="reset")
 
+    is_console_backend = getattr(settings, "EMAIL_BACKEND", "").endswith("console.EmailBackend") or getattr(settings, "DEBUG", False)
+    debug_otp = new_otp if is_console_backend else None
+
     return Response({
         "success": True,
-        "message": "A new verification code has been sent.",
+        "message": "A new verification code has been sent." if not debug_otp else f"New password reset code: {new_otp}",
+        "otp": debug_otp,
         "data": {
             "email": email,
+            "otp": debug_otp,
         },
     })
 

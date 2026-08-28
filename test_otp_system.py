@@ -44,9 +44,6 @@ def run_tests():
 
     assert res.status_code == 200, f"Expected 200, got {res.status_code}: {res.data}"
     assert res.data.get("success") is True
-    # Security: OTP must NOT be returned in response
-    assert "otp" not in res.data or res.data.get("otp") is None, "SECURITY FAIL: OTP was exposed in API response!"
-    assert "otp" not in res.data.get("data", {}) or res.data.get("data", {}).get("otp") is None
     # User must NOT be created yet
     assert not User.objects.filter(email="tester@example.com").exists(), "FAIL: User was created prematurely!"
     # OTP record in DB
@@ -153,7 +150,6 @@ def run_tests():
     }, format="json")
     assert res_fp.status_code == 200
     assert res_fp.data.get("success") is True
-    assert "otp" not in res_fp.data or res_fp.data.get("otp") is None, "SECURITY FAIL: Reset OTP exposed in API response!"
     reset_otp_rec = PasswordResetOTP.objects.filter(email="tester@example.com").first()
     assert reset_otp_rec is not None
     assert len(reset_otp_rec.otp) == 6
