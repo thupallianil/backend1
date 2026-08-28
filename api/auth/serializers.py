@@ -270,8 +270,10 @@ class ForgotPasswordSerializer(serializers.Serializer):
 
 
 class ResetPasswordSerializer(serializers.Serializer):
-    uid = serializers.CharField()
-    token = serializers.CharField()
+    email = serializers.EmailField(required=False, allow_blank=True)
+    otp = serializers.CharField(required=False, allow_blank=True, max_length=10)
+    uid = serializers.CharField(required=False, allow_blank=True)
+    token = serializers.CharField(required=False, allow_blank=True)
 
     password = serializers.CharField(
         min_length=8,
@@ -284,9 +286,14 @@ class ResetPasswordSerializer(serializers.Serializer):
     )
 
     def validate(self, attrs):
-        if attrs["password"] != attrs["password_confirm"]:
+        if attrs.get("password") != attrs.get("password_confirm"):
             raise serializers.ValidationError({
                 "password_confirm": "Passwords do not match."
+            })
+
+        if not (attrs.get("email") and attrs.get("otp")) and not (attrs.get("uid") and attrs.get("token")):
+            raise serializers.ValidationError({
+                "otp": "Please provide your email and 6-digit verification code."
             })
 
         return attrs

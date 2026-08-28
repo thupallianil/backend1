@@ -48,6 +48,31 @@ urlpatterns = [
         name="auth-resend-signup-otp",
     ),
 
+    # Signup route aliases
+    path(
+        "signup/",
+        request_signup_otp,
+        name="auth-signup",
+    ),
+
+    path(
+        "signup/send-otp/",
+        request_signup_otp,
+        name="auth-signup-send-otp",
+    ),
+
+    path(
+        "signup/verify-otp/",
+        verify_signup_otp,
+        name="auth-signup-verify-otp",
+    ),
+
+    path(
+        "signup/resend-otp/",
+        resend_signup_otp,
+        name="auth-signup-resend-otp",
+    ),
+
 
     path(
         "login/",

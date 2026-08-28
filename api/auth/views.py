@@ -33,29 +33,57 @@ from api.models import BusinessProfile, AppSettings, SignupVerificationOTP, Pass
 logger = logging.getLogger(__name__)
 
 
-def send_otp_email(email, otp, name="User"):
-    subject = f"{otp} is your verification code"
+import secrets
+
+
+def generate_secure_otp():
+    """Generates a cryptographically secure 6-digit OTP string."""
+    return f"{secrets.randbelow(900000) + 100000:06d}"
+
+
+def send_otp_email(email, otp, name="User", purpose="signup"):
+    """
+    Dispatches a branded, secure HTML & text OTP email.
+    """
+    is_reset = (purpose == "reset")
+    if is_reset:
+        subject = f"{otp} is your password recovery code"
+        title = "Reset Your Password"
+        desc = "You recently requested to reset your password. Use the verification code below to proceed."
+        expiry_note = "This password recovery code expires in 5 minutes."
+        action_note = "If you did not request a password reset, please ignore this email. Your account remains secure."
+    else:
+        subject = f"{otp} is your verification code"
+        title = "Verify Your Email Address"
+        desc = "Thank you for joining InvoiceFlow. Use the 6-digit verification code below to activate your account."
+        expiry_note = "This verification code expires in 5 minutes."
+        action_note = "If you did not request this registration, you can safely ignore this email."
+
     plain_message = (
         f"Hello {name},\n\n"
-        f"Your verification code to complete your registration is:\n\n"
-        f"{otp}\n\n"
-        f"This code is valid for 10 minutes. If you did not request this, please ignore this email.\n"
+        f"Your verification code is: {otp}\n\n"
+        f"{expiry_note}\n\n"
+        f"{action_note}\n\n"
+        f"Regards,\nInvoiceFlow Team"
     )
+
     html_message = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0;">
-        <div style="text-align: center; margin-bottom: 20px;">
-            <h2 style="color: #0f172a; margin: 0; font-size: 22px; font-weight: 800;">Verify Your Email Address</h2>
-            <p style="color: #64748b; font-size: 13px; margin-top: 6px;">Thank you for registering. Please use the 6-digit verification code below to activate your account.</p>
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px 24px; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; color: #1e293b;">
+        <div style="text-align: center; margin-bottom: 24px;">
+            <div style="display: inline-block; width: 44px; height: 44px; background: #2563eb; border-radius: 12px; line-height: 44px; color: #ffffff; font-size: 22px; font-weight: bold; margin-bottom: 12px;">IF</div>
+            <h2 style="color: #0f172a; margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.5px;">{title}</h2>
+            <p style="color: #64748b; font-size: 14px; margin-top: 6px; line-height: 1.5;">{desc}</p>
         </div>
-        <div style="background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 20px; text-align: center; margin: 20px 0;">
-            <span style="font-family: monospace; font-size: 36px; font-weight: 900; letter-spacing: 8px; color: #2563eb;">{otp}</span>
-            <p style="color: #94a3b8; font-size: 11px; margin-top: 8px; margin-bottom: 0;">Code expires in 10 minutes</p>
+        <div style="background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 14px; padding: 24px; text-align: center; margin: 24px 0;">
+            <span style="font-family: monospace; font-size: 38px; font-weight: 900; letter-spacing: 8px; color: #2563eb; display: block;">{otp}</span>
+            <p style="color: #64748b; font-size: 12px; font-weight: 600; margin-top: 10px; margin-bottom: 0;">{expiry_note}</p>
         </div>
-        <p style="color: #64748b; font-size: 12px; line-height: 1.5;">If you did not request this registration, you can safely ignore this email.</p>
-        <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 20px 0;" />
-        <p style="color: #94a3b8; font-size: 11px; text-align: center; margin: 0;">&copy; InvoiceFlow Cloud Enterprise. All rights reserved.</p>
+        <p style="color: #64748b; font-size: 12px; line-height: 1.6; margin-bottom: 24px;">{action_note}</p>
+        <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 24px 0;" />
+        <p style="color: #94a3b8; font-size: 11px; text-align: center; margin: 0;">&copy; {timezone.now().year} InvoiceFlow Enterprise. All rights reserved.</p>
     </div>
     """
+
     from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None) or "no-reply@invoiceflow.com"
     try:
         send_mail(
@@ -66,12 +94,13 @@ def send_otp_email(email, otp, name="User"):
             html_message=html_message,
             fail_silently=False,
         )
-        logger.info(f"Verification OTP email dispatched to {email}")
+        logger.info(f"OTP email ({purpose}) sent to {email}")
     except Exception as e:
         logger.warning(f"SMTP dispatch note for {email}: {e}")
-    
-    # Always log OTP in console so development & local testing are seamless
-    print(f"\n=======================================================\n[EMAIL VERIFICATION OTP] Sent to: {email} | CODE: {otp}\n=======================================================\n")
+
+    # Log in console only during local debug development
+    if getattr(settings, "DEBUG", False):
+        print(f"\n=======================================================\n[DEBUG OTP - {purpose.upper()}] Sent to: {email} | CODE: {otp}\n=======================================================\n")
 
 
 from .serializers import (
@@ -126,7 +155,7 @@ def token_data(user):
 def request_signup_otp(request):
     """
     Validates registration details without creating the user account.
-    Generates a 6-digit OTP and sends it to the user's email.
+    Generates a 6-digit OTP (expires in 5 minutes) and dispatches it via email.
     """
     try:
         serializer = RegisterSerializer(data=request.data)
@@ -154,14 +183,39 @@ def request_signup_otp(request):
         password = validated["password"]
         role = validated.get("role", "client")
 
-        # Generate 6-digit OTP
-        otp = f"{random.randint(100000, 999999):06d}"
-        expires_at = timezone.now() + timedelta(minutes=10)
+        # Check if email is already registered and verified
+        if User.objects.filter(email__iexact=email).exists():
+            return Response(
+                {
+                    "success": False,
+                    "message": "An account with this email address already exists. Please log in instead.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        # Clear any old OTP records for this email
+        # Resend cooldown: Check if an active OTP was created in the last 60 seconds
+        recent_otp = SignupVerificationOTP.objects.filter(email__iexact=email).order_by("-created_at").first()
+        if recent_otp:
+            elapsed = (timezone.now() - recent_otp.created_at).total_seconds()
+            if elapsed < 60:
+                remaining = int(60 - elapsed)
+                return Response(
+                    {
+                        "success": False,
+                        "message": f"Please wait {remaining} seconds before requesting a new verification code.",
+                        "cooldown": remaining,
+                    },
+                    status=status.HTTP_429_TOO_MANY_REQUESTS,
+                )
+
+        # Generate cryptographically secure 6-digit OTP (5 min expiry)
+        otp = generate_secure_otp()
+        expires_at = timezone.now() + timedelta(minutes=5)
+
+        # Invalidate previous OTP records for this email
         SignupVerificationOTP.objects.filter(email__iexact=email).delete()
 
-        # Store pending signup data temporarily
+        # Store pending registration in temporary data
         company_name = str(request.data.get("company_name", "")).strip()
         SignupVerificationOTP.objects.create(
             email=email,
@@ -177,23 +231,15 @@ def request_signup_otp(request):
             attempts=0,
         )
 
-        # Send verification email safely
-        try:
-            send_otp_email(email, otp, username)
-        except Exception as mail_err:
-            logger.error(f"Error calling send_otp_email: {mail_err}")
-
-        debug_otp = otp if (getattr(settings, "DEBUG", False) or not getattr(settings, "EMAIL_HOST", "")) else None
+        # Dispatch verification email
+        send_otp_email(email, otp, username, purpose="signup")
 
         return Response(
             {
                 "success": True,
                 "message": f"Verification code sent to {email}.",
-                "email": email,
-                "otp": debug_otp,
                 "data": {
                     "email": email,
-                    "otp": debug_otp,
                 },
             },
             status=status.HTTP_200_OK,
@@ -218,7 +264,7 @@ def request_signup_otp(request):
 @permission_classes([AllowAny])
 def verify_signup_otp(request):
     """
-    Verifies the 6-digit OTP. If and only if correct, creates the user account in the database.
+    Verifies the 6-digit OTP. If correct, creates the user account and profile atomically.
     """
     email = str(request.data.get("email", "")).strip().lower()
     otp = str(request.data.get("otp", "")).strip()
@@ -238,52 +284,73 @@ def verify_signup_otp(request):
         return Response(
             {
                 "success": False,
-                "message": "No pending registration found for this email. Please submit the sign-up form again.",
+                "message": "No pending registration found for this email. Please request a new code.",
             },
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Check expiration
-    if timezone.now() > otp_record.expires_at:
-        return Response(
-            {
-                "success": False,
-                "message": "Verification code has expired. Please request a new code.",
-            },
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    # Check attempts
+    # Check maximum attempt limit (5 attempts max)
     if otp_record.attempts >= 5:
+        otp_record.delete()
         return Response(
             {
                 "success": False,
-                "message": "Too many failed attempts. Please request a new verification code.",
+                "message": "Too many attempts. Please request a new verification code.",
             },
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Validate OTP code
-    if otp_record.otp.strip() != otp:
+    # Check expiration (5 minutes)
+    if timezone.now() > otp_record.expires_at:
+        otp_record.delete()
+        return Response(
+            {
+                "success": False,
+                "message": "This verification code has expired. Please request a new code.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Constant-time comparison to prevent timing attacks
+    if not secrets.compare_digest(otp_record.otp.strip(), otp):
         otp_record.attempts += 1
-        otp_record.save()
-        remaining = 5 - otp_record.attempts
+        otp_record.save(update_fields=["attempts"])
+        if otp_record.attempts >= 5:
+            otp_record.delete()
+            return Response(
+                {
+                    "success": False,
+                    "message": "Too many attempts. Please request a new verification code.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         return Response(
             {
                 "success": False,
-                "message": f"Invalid verification code. ({remaining} attempts remaining)",
+                "message": "Invalid verification code. Please try again.",
+                "attempts_remaining": 5 - otp_record.attempts,
             },
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Valid OTP verified -> Create User and BusinessProfile atomically
+    # Double check email uniqueness before committing
+    if User.objects.filter(email__iexact=email).exists():
+        otp_record.delete()
+        return Response(
+            {
+                "success": False,
+                "message": "An account with this email address already exists. Please log in instead.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Valid OTP -> Atomically provision User and associated profile
     temp_data = otp_record.temp_data or {}
     username = temp_data.get("username", email.split("@")[0]).strip()
     password = temp_data.get("password")
     role = temp_data.get("role", "client")
     company_name = temp_data.get("company_name") or f"{username}'s Business"
 
-    # Generate unique username
     unique_username = f"{username}_{uuid.uuid4().hex[:6]}"
 
     with transaction.atomic():
@@ -296,20 +363,17 @@ def verify_signup_otp(request):
             is_superuser=(role == "admin"),
         )
 
-        business, _ = BusinessProfile.objects.get_or_create(
-            owner=user,
-            defaults={
-                "business_name": company_name,
-                "email": user.email,
-            },
-        )
+        if role == "admin":
+            business, _ = BusinessProfile.objects.get_or_create(
+                owner=user,
+                defaults={
+                    "business_name": company_name,
+                    "email": user.email,
+                },
+            )
+            AppSettings.objects.get_or_create(business=business)
 
-
-        AppSettings.objects.get_or_create(
-            business=business,
-        )
-
-        # Cleanup OTP record
+        # Single-use: delete OTP record after successful account creation
         otp_record.delete()
 
     tokens = token_data(user)
@@ -317,7 +381,7 @@ def verify_signup_otp(request):
     return Response(
         {
             "success": True,
-            "message": "Email verified successfully! Account created.",
+            "message": "Email verified successfully. Account created.",
             "access": tokens["access"],
             "refresh": tokens["refresh"],
             "data": {
@@ -339,7 +403,7 @@ def verify_signup_otp(request):
 @permission_classes([AllowAny])
 def resend_signup_otp(request):
     """
-    Resends a new 6-digit verification code to the email.
+    Resends a new 6-digit verification code with a 60-second cooldown.
     """
     email = str(request.data.get("email", "")).strip().lower()
 
@@ -363,26 +427,35 @@ def resend_signup_otp(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Generate fresh OTP
-    new_otp = f"{random.randint(100000, 999999):06d}"
+    # 60s cooldown check
+    elapsed = (timezone.now() - otp_record.created_at).total_seconds()
+    if elapsed < 60:
+        remaining = int(60 - elapsed)
+        return Response(
+            {
+                "success": False,
+                "message": f"Please wait {remaining} seconds before requesting a new verification code.",
+                "cooldown": remaining,
+            },
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+
+    # Generate fresh OTP and reset expiry to 5 mins
+    new_otp = generate_secure_otp()
     otp_record.otp = new_otp
-    otp_record.expires_at = timezone.now() + timedelta(minutes=10)
+    otp_record.expires_at = timezone.now() + timedelta(minutes=5)
     otp_record.attempts = 0
     otp_record.save()
 
     username = otp_record.temp_data.get("username", "User")
-    send_otp_email(email, new_otp, username)
-
-    debug_otp = new_otp if (getattr(settings, "DEBUG", False) or not getattr(settings, "EMAIL_HOST", "")) else None
+    send_otp_email(email, new_otp, username, purpose="signup")
 
     return Response(
         {
             "success": True,
-            "message": f"New verification code sent to {email}.",
-            "otp": debug_otp,
+            "message": "A new verification code has been sent.",
             "data": {
                 "email": email,
-                "otp": debug_otp,
             },
         },
         status=status.HTTP_200_OK,
@@ -591,25 +664,38 @@ def refresh(request):
 # ============================================================
 
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def logout(request):
-    refresh_token = request.data.get("refresh")
+    serializer = LogoutInputSerializer(
+        data=request.data
+    )
 
-    if refresh_token:
-        try:
-            token = RefreshToken(
-                refresh_token
-            )
+    serializer.is_valid(
+        raise_exception=True
+    )
 
-            token.blacklist()
+    refresh_token = serializer.validated_data["refresh"]
 
-        except Exception:
-            pass
+    try:
+        token = RefreshToken(
+            refresh_token
+        )
 
-    return Response({
-        "success": True,
-        "message": "Logout successful.",
-    })
+        token.blacklist()
+
+        return Response({
+            "success": True,
+            "message": "Logged out successfully.",
+        })
+
+    except Exception:
+        return Response(
+            {
+                "success": False,
+                "message": "Invalid refresh token.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
 
 # ============================================================
@@ -623,45 +709,25 @@ def change_password(request):
         data=request.data
     )
 
-    if not serializer.is_valid():
-        first_err = "Invalid password data provided."
-        for field, err_list in serializer.errors.items():
-            if isinstance(err_list, list) and len(err_list) > 0:
-                first_err = f"{err_list[0]}"
-                break
-            elif isinstance(err_list, str):
-                first_err = err_list
-                break
-
-        return Response(
-            {
-                "success": False,
-                "message": first_err,
-                "errors": serializer.errors,
-            },
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+    serializer.is_valid(
+        raise_exception=True
+    )
 
     user = request.user
+    old_password = serializer.validated_data["old_password"]
+    new_password = serializer.validated_data["new_password"]
 
-    if not user.check_password(
-        serializer.validated_data["old_password"]
-    ):
+    if not user.check_password(old_password):
         return Response(
             {
                 "success": False,
-                "message": "Current password is incorrect. Please enter your existing password.",
+                "message": "Current password is incorrect.",
             },
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    user.set_password(
-        serializer.validated_data["new_password"]
-    )
-
-    user.save(
-        update_fields=["password"]
-    )
+    user.set_password(new_password)
+    user.save(update_fields=["password"])
 
     return Response({
         "success": True,
@@ -671,25 +737,18 @@ def change_password(request):
 
 
 # ============================================================
-# FORGOT PASSWORD (OTP & LINK GENERATION)
+# FORGOT PASSWORD (OTP GENERATION & DISPATCH)
 # ============================================================
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def forgot_password(request):
-    serializer = ForgotPasswordSerializer(
-        data=request.data
-    )
-
-    serializer.is_valid(
-        raise_exception=True
-    )
+    serializer = ForgotPasswordSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
 
     email = serializer.validated_data["email"].strip().lower()
 
-    user = User.objects.filter(
-        email__iexact=email
-    ).first()
+    user = User.objects.filter(email__iexact=email).first()
 
     if not user:
         return Response(
@@ -700,11 +759,26 @@ def forgot_password(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # 1. Generate 6-digit OTP code
-    otp = f"{random.randint(100000, 999999):06d}"
-    expires_at = timezone.now() + timedelta(minutes=10)
+    # 60s cooldown check
+    recent_reset = PasswordResetOTP.objects.filter(email__iexact=email).order_by("-created_at").first()
+    if recent_reset:
+        elapsed = (timezone.now() - recent_reset.created_at).total_seconds()
+        if elapsed < 60:
+            remaining = int(60 - elapsed)
+            return Response(
+                {
+                    "success": False,
+                    "message": f"Please wait {remaining} seconds before requesting a new verification code.",
+                    "cooldown": remaining,
+                },
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
 
-    # Clear old reset OTPs
+    # Generate 6-digit OTP (5 min expiry)
+    otp = generate_secure_otp()
+    expires_at = timezone.now() + timedelta(minutes=5)
+
+    # Invalidate older reset OTP records
     PasswordResetOTP.objects.filter(email__iexact=email).delete()
 
     PasswordResetOTP.objects.create(
@@ -714,63 +788,14 @@ def forgot_password(request):
         attempts=0,
     )
 
-    # 2. Generate backup reset link
-    uid = urlsafe_base64_encode(force_bytes(user.pk))
-    token = default_token_generator.make_token(user)
-    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:5173").rstrip("/")
-    reset_url = f"{frontend_url}/reset-password?uid={uid}&token={token}"
-
-    # 3. Send styled email
-    subject = f"{otp} is your password reset code"
-    plain_message = (
-        f"Hello {user.get_full_name() or user.username},\n\n"
-        f"You recently requested to reset your password.\n\n"
-        f"Your 6-digit verification code is:\n\n"
-        f"{otp}\n\n"
-        f"This code will expire in 10 minutes.\n\n"
-        f"Alternatively, you can reset your password directly using this link:\n"
-        f"{reset_url}\n\n"
-        f"If you did not request a password reset, please ignore this email.\n\n"
-        f"Regards,\nInvoiceFlow Support Team"
-    )
-
-    html_message = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0;">
-        <div style="text-align: center; margin-bottom: 20px;">
-            <h2 style="color: #0f172a; margin: 0; font-size: 22px; font-weight: 800;">Password Reset Request</h2>
-            <p style="color: #64748b; font-size: 13px; margin-top: 6px;">Use the verification code below to reset your account password.</p>
-        </div>
-        <div style="background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 20px; text-align: center; margin: 20px 0;">
-            <span style="font-family: monospace; font-size: 36px; font-weight: 900; letter-spacing: 8px; color: #2563eb;">{otp}</span>
-            <p style="color: #94a3b8; font-size: 11px; margin-top: 8px; margin-bottom: 0;">Code expires in 10 minutes</p>
-        </div>
-        <p style="color: #64748b; font-size: 12px; line-height: 1.5;">If you did not request a password reset, please ignore this message. Your account remains secure.</p>
-        <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 20px 0;" />
-        <p style="color: #94a3b8; font-size: 11px; text-align: center; margin: 0;">&copy; InvoiceFlow Cloud Enterprise. All rights reserved.</p>
-    </div>
-    """
-    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None) or "no-reply@invoiceflow.com"
-
-    try:
-        send_mail(subject, plain_message, from_email, [email], html_message=html_message, fail_silently=False)
-        logger.info(f"Password reset email sent to {email}")
-    except Exception as e:
-        logger.warning(f"SMTP note for password reset {email}: {e}")
-
-    # Always log OTP in console so testing is never blocked
-    print(f"\n=======================================================\n[PASSWORD RESET OTP] Sent to: {email} | CODE: {otp}\nReset URL: {reset_url}\n=======================================================\n")
-
-    debug_otp = otp if (getattr(settings, "DEBUG", False) or not getattr(settings, "EMAIL_HOST", "")) else None
+    # Send password reset email
+    send_otp_email(email, otp, user.get_full_name() or user.username, purpose="reset")
 
     return Response({
         "success": True,
         "message": f"Password reset verification code sent to {email}.",
-        "otp": debug_otp,
         "data": {
             "email": email,
-            "otp": debug_otp,
-            "user_found": True,
-            "reset_url": reset_url if getattr(settings, "DEBUG", False) else None,
         },
     })
 
@@ -803,30 +828,45 @@ def resend_password_reset_otp(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    otp_record = PasswordResetOTP.objects.filter(email__iexact=email).order_by("-created_at").first()
 
-    new_otp = f"{random.randint(100000, 999999):06d}"
-    expires_at = timezone.now() + timedelta(minutes=10)
+    if not otp_record:
+        return Response(
+            {
+                "success": False,
+                "message": "No active password reset request found. Please request a new code.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-    otp_record, _ = PasswordResetOTP.objects.get_or_create(email=email, defaults={"otp": new_otp, "expires_at": expires_at})
+    # 60s cooldown check
+    elapsed = (timezone.now() - otp_record.created_at).total_seconds()
+    if elapsed < 60:
+        remaining = int(60 - elapsed)
+        return Response(
+            {
+                "success": False,
+                "message": f"Please wait {remaining} seconds before requesting a new verification code.",
+                "cooldown": remaining,
+            },
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+
+    # Generate fresh OTP (5 min expiry)
+    new_otp = generate_secure_otp()
     otp_record.otp = new_otp
-    otp_record.expires_at = expires_at
+    otp_record.expires_at = timezone.now() + timedelta(minutes=5)
     otp_record.attempts = 0
     otp_record.save()
 
-    subject = f"{new_otp} is your new password reset code"
-    plain_message = f"Hello {user.get_full_name() or user.username},\n\nYour new password reset verification code is:\n\n{new_otp}\n\nValid for 10 minutes."
-    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None) or "no-reply@invoiceflow.com"
-
-    try:
-        send_mail(subject, plain_message, from_email, [email], fail_silently=False)
-    except Exception as e:
-        logger.warning(f"SMTP note on resend: {e}")
-
-    print(f"\n=======================================================\n[PASSWORD RESET OTP RESENT] Sent to: {email} | CODE: {new_otp}\n=======================================================\n")
+    send_otp_email(email, new_otp, user.get_full_name() or user.username, purpose="reset")
 
     return Response({
         "success": True,
-        "message": f"New verification code sent to {email}.",
+        "message": "A new verification code has been sent.",
+        "data": {
+            "email": email,
+        },
     })
 
 
@@ -842,8 +882,8 @@ def reset_password(request):
     otp = str(data.get("otp", "")).strip()
     uid = data.get("uid")
     token = data.get("token")
-    password = data.get("password")
-    password_confirm = data.get("password_confirm")
+    password = data.get("password") or data.get("new_password")
+    password_confirm = data.get("password_confirm") or data.get("new_password_confirm") or data.get("confirm_password") or data.get("confirmPassword")
 
     if not password:
         return Response(
@@ -885,38 +925,51 @@ def reset_password(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if timezone.now() > otp_record.expires_at:
-            return Response(
-                {
-                    "success": False,
-                    "message": "Verification code has expired. Please request a new code.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         if otp_record.attempts >= 5:
+            otp_record.delete()
             return Response(
                 {
                     "success": False,
-                    "message": "Too many failed attempts. Please request a new code.",
+                    "message": "Too many attempts. Please request a new verification code.",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if otp_record.otp.strip() != otp:
-            otp_record.attempts += 1
-            otp_record.save()
-            remaining = 5 - otp_record.attempts
+        if timezone.now() > otp_record.expires_at:
+            otp_record.delete()
             return Response(
                 {
                     "success": False,
-                    "message": f"Invalid verification code. ({remaining} attempts remaining)",
+                    "message": "This verification code has expired. Please request a new code.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Constant-time comparison
+        if not secrets.compare_digest(otp_record.otp.strip(), otp):
+            otp_record.attempts += 1
+            otp_record.save(update_fields=["attempts"])
+            if otp_record.attempts >= 5:
+                otp_record.delete()
+                return Response(
+                    {
+                        "success": False,
+                        "message": "Too many attempts. Please request a new verification code.",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            return Response(
+                {
+                    "success": False,
+                    "message": "Invalid verification code. Please try again.",
+                    "attempts_remaining": 5 - otp_record.attempts,
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         user = User.objects.filter(email__iexact=email).first()
         if not user:
+            otp_record.delete()
             return Response(
                 {
                     "success": False,
@@ -925,16 +978,18 @@ def reset_password(request):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        user.set_password(password)
-        user.save(update_fields=["password"])
-        otp_record.delete()
+        with transaction.atomic():
+            user.set_password(password)
+            user.save(update_fields=["password"])
+            # Invalidate all reset OTPs for this email
+            PasswordResetOTP.objects.filter(email__iexact=email).delete()
 
         return Response({
             "success": True,
             "message": "Password reset successfully! You can now log in with your new password.",
         })
 
-    # 2. Token-Based Verification Flow (from email link)
+    # 2. Token-Based Verification Flow (from backup reset link)
     if uid and token:
         try:
             uid_value = urlsafe_base64_decode(uid).decode()
@@ -957,8 +1012,10 @@ def reset_password(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        user.set_password(password)
-        user.save(update_fields=["password"])
+        with transaction.atomic():
+            user.set_password(password)
+            user.save(update_fields=["password"])
+            PasswordResetOTP.objects.filter(email__iexact=user.email).delete()
 
         return Response({
             "success": True,
@@ -968,7 +1025,7 @@ def reset_password(request):
     return Response(
         {
             "success": False,
-            "message": "Please provide the 6-digit verification code or a valid reset token.",
+            "message": "Invalid request. Please provide the 6-digit verification code.",
         },
         status=status.HTTP_400_BAD_REQUEST,
     )
