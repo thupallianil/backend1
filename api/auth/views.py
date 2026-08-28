@@ -183,13 +183,17 @@ def request_signup_otp(request):
         except Exception as mail_err:
             logger.error(f"Error calling send_otp_email: {mail_err}")
 
+        debug_otp = otp if (getattr(settings, "DEBUG", False) or not getattr(settings, "EMAIL_HOST", "")) else None
+
         return Response(
             {
                 "success": True,
                 "message": f"Verification code sent to {email}.",
                 "email": email,
+                "otp": debug_otp,
                 "data": {
                     "email": email,
+                    "otp": debug_otp,
                 },
             },
             status=status.HTTP_200_OK,
@@ -369,10 +373,17 @@ def resend_signup_otp(request):
     username = otp_record.temp_data.get("username", "User")
     send_otp_email(email, new_otp, username)
 
+    debug_otp = new_otp if (getattr(settings, "DEBUG", False) or not getattr(settings, "EMAIL_HOST", "")) else None
+
     return Response(
         {
             "success": True,
             "message": f"New verification code sent to {email}.",
+            "otp": debug_otp,
+            "data": {
+                "email": email,
+                "otp": debug_otp,
+            },
         },
         status=status.HTTP_200_OK,
     )
@@ -749,11 +760,15 @@ def forgot_password(request):
     # Always log OTP in console so testing is never blocked
     print(f"\n=======================================================\n[PASSWORD RESET OTP] Sent to: {email} | CODE: {otp}\nReset URL: {reset_url}\n=======================================================\n")
 
+    debug_otp = otp if (getattr(settings, "DEBUG", False) or not getattr(settings, "EMAIL_HOST", "")) else None
+
     return Response({
         "success": True,
         "message": f"Password reset verification code sent to {email}.",
+        "otp": debug_otp,
         "data": {
             "email": email,
+            "otp": debug_otp,
             "user_found": True,
             "reset_url": reset_url if getattr(settings, "DEBUG", False) else None,
         },
