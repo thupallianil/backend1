@@ -147,6 +147,27 @@ CORS_ALLOW_METHODS = [
     "PUT",
 ]
 
+# ============================================================
+# CSRF & PROXY SSL CONFIGURATION (For Render / Vercel / Railway)
+# ============================================================
+
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://*.vercel.app",
+    "https://*.onrender.com",
+    "https://*.railway.app",
+]
+
+env_csrf = os.environ.get("CSRF_TRUSTED_ORIGINS", "")
+if env_csrf:
+    CSRF_TRUSTED_ORIGINS.extend([origin.strip() for origin in env_csrf.split(",") if origin.strip()])
+
+
 
 
 # ============================================================
@@ -196,15 +217,37 @@ ASGI_APPLICATION = "config.asgi.application"
 # DATABASE
 # ============================================================
 
-DATABASES = {
-    "default": {
-        "ENGINE":
-            "django.db.backends.sqlite3",
-
-        "NAME":
-            BASE_DIR / "db.sqlite3",
+database_url = os.environ.get("DATABASE_URL")
+if database_url:
+    try:
+        import dj_database_url
+        DATABASES = {
+            "default": dj_database_url.config(
+                default=database_url,
+                conn_max_age=600,
+                conn_health_checks=True,
+            )
+        }
+    except ImportError:
+        import urllib.parse as urlparse
+        url = urlparse.urlparse(database_url)
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.postgresql",
+                "NAME": url.path[1:],
+                "USER": url.username,
+                "PASSWORD": url.password,
+                "HOST": url.hostname,
+                "PORT": url.port or 5432,
+            }
+        }
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
     }
-}
 
 
 # ============================================================
