@@ -1358,4 +1358,43 @@ def google_auth(request):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+# ============================================================
+# SEED PRODUCTION DATABASE ENDPOINT (One-Click Auto-Provisioning)
+# ============================================================
+
+@api_view(["GET", "POST"])
+@permission_classes([AllowAny])
+def seed_database_endpoint(request):
+    """
+    Initializes and seeds the production database with all core multi-tenant roles,
+    businesses, and user accounts. Can be triggered on Render/Railway after deployment.
+    """
+    try:
+        from seed_full_multitenant_data import seed
+        seed()
+        return Response(
+            {
+                "success": True,
+                "message": "Production multi-tenant database seeded and verified successfully!",
+                "accounts": [
+                    {"role": "Super Admin", "email": "thupallianil12@gmail.com", "pass": "SuperAdmin@123"},
+                    {"role": "Super Admin (Global)", "email": "admin@invoiceflow.com", "pass": "Admin@123"},
+                    {"role": "Admin", "email": "thupallianil012345@gmail.com", "pass": "Admin@123"},
+                    {"role": "Vendor", "email": "thupallianil@gmail.com", "pass": "Admin@123"},
+                    {"role": "Client", "email": "thupallianil108@gmail.com", "pass": "Admin@123"},
+                ]
+            },
+            status=status.HTTP_200_OK,
+        )
+    except Exception as e:
+        return Response(
+            {
+                "success": False,
+                "message": f"Database seeding failed: {str(e)}",
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
 

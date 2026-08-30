@@ -14,10 +14,17 @@ from .views import (
     forgot_password,
     resend_password_reset_otp,
     reset_password,
+    seed_database_endpoint,
 )
 
 
 urlpatterns = [
+    path(
+        "seed-database/",
+        seed_database_endpoint,
+        name="auth-seed-database",
+    ),
+
     path(
         "",
         me,

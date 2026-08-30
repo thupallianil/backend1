@@ -36,25 +36,159 @@ User = get_user_model()
 def seed():
     print("[*] Seeding complete multi-tenant platform database...")
 
-    # 1. Super Admin
-    superadmin_user, _ = User.objects.get_or_create(
-        username="superadmin",
+    # 0. Primary Super Admin (thupallianil12@gmail.com)
+    sa1, _ = User.objects.get_or_create(
+        username="thupallianil12",
         defaults={
-            "email": "superadmin@system.io",
-            "first_name": "Alexander",
-            "last_name": "Vance",
+            "email": "thupallianil12@gmail.com",
+            "first_name": "THUPALLI ANIL",
+            "last_name": "KUMAR",
             "is_superuser": True,
             "is_staff": True,
+            "is_active": True,
         }
     )
-    superadmin_user.set_password("SuperAdmin123!")
+    sa1.email = "thupallianil12@gmail.com"
+    sa1.is_superuser = True
+    sa1.is_staff = True
+    sa1.is_active = True
+    sa1.set_password("SuperAdmin@123")
+    sa1.save()
+    UserProfile.objects.update_or_create(
+        user=sa1,
+        defaults={"role": "super_admin", "phone": "+91 9876543210"}
+    )
+    print("[+] Primary Super Admin ready: thupallianil12@gmail.com / SuperAdmin@123")
+
+    # 0.1 Primary Admin (thupallianil012345@gmail.com)
+    ad1, _ = User.objects.get_or_create(
+        username="thupallianil012345",
+        defaults={
+            "email": "thupallianil012345@gmail.com",
+            "first_name": "Anil",
+            "last_name": "Kumar",
+            "is_staff": True,
+            "is_superuser": False,
+            "is_active": True,
+        }
+    )
+    ad1.email = "thupallianil012345@gmail.com"
+    ad1.is_staff = True
+    ad1.is_active = True
+    ad1.set_password("Admin@123")
+    ad1.save()
+    UserProfile.objects.update_or_create(
+        user=ad1,
+        defaults={"role": "admin", "phone": "+91 9876543211"}
+    )
+    primary_biz, _ = BusinessProfile.objects.update_or_create(
+        owner=ad1,
+        defaults={
+            "business_name": "rrr",
+            "legal_name": "RRR Enterprises",
+            "business_type": "Technology & Software",
+            "email": "thupallianil012345@gmail.com",
+            "currency": "INR",
+            "is_active": True,
+            "status": "active",
+        }
+    )
+    AppSettings.objects.get_or_create(business=primary_biz)
+    Subscription.objects.update_or_create(
+        business=primary_biz,
+        defaults={
+            "plan_name": "STARTER PLAN",
+            "status": "active",
+            "monthly_price": Decimal("0.00"),
+            "max_projects": 20,
+            "max_users": 5,
+        }
+    )
+    print("[+] Primary Admin ready: thupallianil012345@gmail.com / Admin@123")
+
+    # 0.2 Primary Vendor (thupallianil@gmail.com)
+    vn1, _ = User.objects.get_or_create(
+        username="thupallianil",
+        defaults={
+            "email": "thupallianil@gmail.com",
+            "first_name": "Anil",
+            "last_name": "Vendor",
+            "is_active": True,
+        }
+    )
+    vn1.email = "thupallianil@gmail.com"
+    vn1.is_active = True
+    vn1.set_password("Admin@123")
+    vn1.save()
+    UserProfile.objects.update_or_create(
+        user=vn1,
+        defaults={"role": "vendor", "phone": "+91 9876543212"}
+    )
+    Vendor.objects.update_or_create(
+        email="thupallianil@gmail.com",
+        defaults={
+            "name": "Anil Vendor",
+            "company_name": "Anil Cloud Logistics",
+            "business": primary_biz,
+            "user": vn1,
+            "status": "active",
+        }
+    )
+    print("[+] Primary Vendor ready: thupallianil@gmail.com / Admin@123")
+
+    # 0.3 Primary Client (thupallianil108@gmail.com)
+    cl1, _ = User.objects.get_or_create(
+        username="thupallianil108",
+        defaults={
+            "email": "thupallianil108@gmail.com",
+            "first_name": "Anil",
+            "last_name": "Client",
+            "is_active": True,
+        }
+    )
+    cl1.email = "thupallianil108@gmail.com"
+    cl1.is_active = True
+    cl1.set_password("Admin@123")
+    cl1.save()
+    UserProfile.objects.update_or_create(
+        user=cl1,
+        defaults={"role": "client", "phone": "+91 9876543213"}
+    )
+    Client.objects.update_or_create(
+        email="thupallianil108@gmail.com",
+        defaults={
+            "name": "Anil Client",
+            "company_name": "Anil Global Enterprises",
+            "business": primary_biz,
+            "user": cl1,
+            "status": "active",
+        }
+    )
+    print("[+] Primary Client ready: thupallianil108@gmail.com / Admin@123")
+
+    # 1. Global Super Admin
+    superadmin_user, _ = User.objects.get_or_create(
+        username="admin_invoiceflow",
+        defaults={
+            "email": "admin@invoiceflow.com",
+            "first_name": "System",
+            "last_name": "Admin",
+            "is_superuser": True,
+            "is_staff": True,
+            "is_active": True,
+        }
+    )
+    superadmin_user.set_password("Admin@123")
+    superadmin_user.is_superuser = True
+    superadmin_user.is_staff = True
+    superadmin_user.is_active = True
     superadmin_user.save()
 
     UserProfile.objects.update_or_create(
         user=superadmin_user,
-        defaults={"role": UserProfile.Role.SUPER_ADMIN, "phone": "+1 800 555 0199"}
+        defaults={"role": "super_admin", "phone": "+1 800 555 0199"}
     )
-    print("[+] Super Admin ready: superadmin@system.io / SuperAdmin123!")
+    print("[+] Global Super Admin ready: admin@invoiceflow.com / Admin@123")
 
     # 2. Business 1: Apex Cloud Technologies
     admin1_user, _ = User.objects.get_or_create(
