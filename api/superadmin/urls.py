@@ -3,6 +3,7 @@ from . import views
 
 urlpatterns = [
     path("stats/", views.superadmin_stats, name="superadmin_stats"),
+    path("dashboard/", views.superadmin_stats, name="superadmin_dashboard"),
     path("tenants/", views.superadmin_tenants, name="superadmin_tenants"),
     path("tenants/<int:pk>/toggle/", views.superadmin_toggle_tenant, name="superadmin_toggle_tenant"),
     path("users/", views.superadmin_users, name="superadmin_users"),

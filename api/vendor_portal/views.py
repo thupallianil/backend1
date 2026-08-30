@@ -214,7 +214,7 @@ def vendor_invoices(request):
             "due_date": str(i.due_date or "-"),
             "status": i.status.replace("_", " ").title(),
             "amount": float(i.total),
-            "paid_amount": float(i.amount_paid),
+            "paid_amount": float(i.paid_amount),
         }
         for i in invoices_qs.order_by("-created_at")
     ]

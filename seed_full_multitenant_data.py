@@ -131,7 +131,7 @@ def seed():
             "company_name": "Anil Cloud Logistics",
             "business": primary_biz,
             "user": vn1,
-            "status": "active",
+            "is_active": True,
         }
     )
     print("[+] Primary Vendor ready: thupallianil@gmail.com / Admin@123")
@@ -161,34 +161,92 @@ def seed():
             "company_name": "Anil Global Enterprises",
             "business": primary_biz,
             "user": cl1,
-            "status": "active",
+            "is_active": True,
         }
     )
     print("[+] Primary Client ready: thupallianil108@gmail.com / Admin@123")
 
-    # 1. Global Super Admin
-    superadmin_user, _ = User.objects.get_or_create(
-        username="admin_invoiceflow",
+    # 1. Global Super Admin (superadmin@invoiceflow.com & admin@invoiceflow.com)
+    for sa_email in ["superadmin@invoiceflow.com", "admin@invoiceflow.com"]:
+        sa_u, _ = User.objects.get_or_create(
+            username=sa_email.split("@")[0],
+            defaults={
+                "email": sa_email,
+                "first_name": "System",
+                "last_name": "Super Admin",
+                "is_superuser": True,
+                "is_staff": True,
+                "is_active": True,
+            }
+        )
+        sa_u.email = sa_email
+        sa_u.set_password("SuperAdmin@123" if "superadmin" in sa_email else "Admin@123")
+        sa_u.is_superuser = True
+        sa_u.is_staff = True
+        sa_u.is_active = True
+        sa_u.save()
+
+        UserProfile.objects.update_or_create(
+            user=sa_u,
+            defaults={"role": "super_admin", "phone": "+1 800 555 0199"}
+        )
+        print(f"[+] Global Super Admin ready: {sa_email}")
+
+    # 1.1 Global Demo Admin (admin@invoiceflow.com)
+    demo_admin, _ = User.objects.get_or_create(
+        username="invoiceflow_admin",
         defaults={
-            "email": "admin@invoiceflow.com",
-            "first_name": "System",
+            "email": "demo_admin@invoiceflow.com",
+            "first_name": "InvoiceFlow",
             "last_name": "Admin",
-            "is_superuser": True,
             "is_staff": True,
+            "is_superuser": False,
             "is_active": True,
         }
     )
-    superadmin_user.set_password("Admin@123")
-    superadmin_user.is_superuser = True
-    superadmin_user.is_staff = True
-    superadmin_user.is_active = True
-    superadmin_user.save()
+    demo_admin.set_password("Admin@123")
+    demo_admin.is_staff = True
+    demo_admin.is_active = True
+    demo_admin.save()
+    UserProfile.objects.update_or_create(user=demo_admin, defaults={"role": "admin"})
 
-    UserProfile.objects.update_or_create(
-        user=superadmin_user,
-        defaults={"role": "super_admin", "phone": "+1 800 555 0199"}
+    # 1.2 Global Demo Vendor (vendor@invoiceflow.com)
+    demo_vn, _ = User.objects.get_or_create(
+        username="invoiceflow_vendor",
+        defaults={
+            "email": "vendor@invoiceflow.com",
+            "first_name": "InvoiceFlow",
+            "last_name": "Supplier",
+            "is_active": True,
+        }
     )
-    print("[+] Global Super Admin ready: admin@invoiceflow.com / Admin@123")
+    demo_vn.set_password("Vendor@123")
+    demo_vn.is_active = True
+    demo_vn.save()
+    UserProfile.objects.update_or_create(user=demo_vn, defaults={"role": "vendor"})
+    Vendor.objects.update_or_create(
+        email="vendor@invoiceflow.com",
+        defaults={"name": "InvoiceFlow Supplier", "company_name": "InvoiceFlow Logistics", "business": primary_biz, "user": demo_vn, "is_active": True}
+    )
+
+    # 1.3 Global Demo Client (client@invoiceflow.com)
+    demo_cl, _ = User.objects.get_or_create(
+        username="invoiceflow_client",
+        defaults={
+            "email": "client@invoiceflow.com",
+            "first_name": "InvoiceFlow",
+            "last_name": "Customer",
+            "is_active": True,
+        }
+    )
+    demo_cl.set_password("Client@123")
+    demo_cl.is_active = True
+    demo_cl.save()
+    UserProfile.objects.update_or_create(user=demo_cl, defaults={"role": "client"})
+    Client.objects.update_or_create(
+        email="client@invoiceflow.com",
+        defaults={"name": "InvoiceFlow Customer", "company_name": "InvoiceFlow Enterprise", "business": primary_biz, "user": demo_cl, "is_active": True}
+    )
 
     # 2. Business 1: Apex Cloud Technologies
     admin1_user, _ = User.objects.get_or_create(

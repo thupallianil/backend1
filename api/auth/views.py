@@ -158,6 +158,25 @@ def user_data(user):
             avatar_url = profile.avatar.url
         except Exception:
             avatar_url = str(profile.avatar)
+
+    business_id = None
+    business_name = ""
+    if role == "admin":
+        biz = BusinessProfile.objects.filter(owner=user).first()
+        if biz:
+            business_id = biz.id
+            business_name = biz.business_name
+    elif role == "vendor":
+        v = Vendor.objects.filter(user=user).first() or Vendor.objects.filter(email__iexact=user.email).first()
+        if v and v.business:
+            business_id = v.business.id
+            business_name = v.business.business_name
+    elif role == "client":
+        c = Client.objects.filter(user=user).first() or Client.objects.filter(email__iexact=user.email).first()
+        if c and c.business:
+            business_id = c.business.id
+            business_name = c.business.business_name
+
     return {
         "id": user.id,
         "username": user.username,
@@ -168,6 +187,8 @@ def user_data(user):
         "is_staff": user.is_staff,
         "is_superuser": user.is_superuser,
         "role": role,
+        "business_id": business_id,
+        "business_name": business_name,
         "phone": profile.phone if profile else "",
         "avatar": avatar_url,
     }
