@@ -12,6 +12,7 @@ from api.models import (
     Invoice,
     Payment,
     Quote,
+    AuditLog,
 )
 from api.reports.services import ReportService
 
@@ -87,11 +88,32 @@ def dashboard(request):
 
     business = get_business(request.user)
     if not business:
-        business = BusinessProfile.objects.create(
-            owner=request.user,
-            business_name=f"{request.user.username}'s Business",
-            email=request.user.email,
-        )
+        return Response({
+            "success": True,
+            "data": {
+                "quotes": {"total": 0, "pending": 0, "under_review": 0, "approved": 0, "rejected": 0},
+                "invoices": {"total": 0, "draft": 0, "under_review": 0, "approved": 0, "paid": 0},
+                "stats": {
+                    "total_clients": 0,
+                    "total_vendors": 0,
+                    "total_revenue": 0.0,
+                    "total_invoices": 0,
+                    "total_quotes": 0,
+                    "total_deliverables": 0,
+                    "approved_deliverables": 0,
+                    "pending_deliverables": 0,
+                },
+                "recent_quotes": [],
+                "recent_invoices": [],
+                "recent_activities": [],
+                "chart_data": {
+                    "labels": ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
+                    "revenue": [0, 0, 0, 0, 0, 0],
+                    "invoices": [0, 0, 0, 0, 0, 0],
+                    "quotes": [0, 0, 0, 0, 0, 0],
+                },
+            }
+        })
 
     invoices = Invoice.objects.filter(
         business=business
@@ -101,143 +123,122 @@ def dashboard(request):
         business=business
     )
 
+    # Calculate quote counts and statuses
+    quotes = Quote.objects.filter(business=business)
+    quotes_count = quotes.count()
+    quotes_pending = quotes.filter(status__in=[Quote.Status.DRAFT, Quote.Status.SENT]).count()
+    quotes_under_review = quotes.filter(status=Quote.Status.SENT).count()
+    quotes_approved = quotes.filter(status=Quote.Status.ACCEPTED).count()
+    quotes_rejected = quotes.filter(status=Quote.Status.REJECTED).count()
+
+    # Calculate invoice counts and statuses
+    invoices_count = invoices.count()
+    inv_draft = invoices.filter(status=Invoice.Status.DRAFT).count()
+    inv_under_review = invoices.filter(status__in=[Invoice.Status.SENT, Invoice.Status.PARTIALLY_PAID]).count()
+    inv_approved = invoices.filter(status=Invoice.Status.SENT).count()
+    inv_paid = invoices.filter(status=Invoice.Status.PAID).count()
+
+    total_revenue_val = (
+        payments.filter(status=Payment.Status.SUCCESS).aggregate(total=Sum("amount"))["total"] or 0
+    )
+
+    clients_count = Client.objects.filter(business=business).count()
+    vendors_count = Vendor.objects.filter(business=business).count()
+
+    # Dynamic recent activities from audit log
+    recent_activities_qs = AuditLog.objects.filter(business=business).order_by("-created_at")[:6]
+    recent_activities = [
+        {
+            "id": a.id,
+            "type": a.action.lower(),
+            "title": a.action.replace("_", " ").title(),
+            "subtitle": a.details or f"By {a.actor.username if a.actor else 'Admin'}",
+            "time": a.created_at.strftime("%b %d, %H:%M") if a.created_at else "Recently",
+            "color": "purple",
+        }
+        for a in recent_activities_qs
+    ]
+
+    total_q_safe = quotes_count if quotes_count > 0 else 1
+    total_i_safe = invoices_count if invoices_count > 0 else 1
+
     return Response({
         "success": True,
         "data": {
-            "clients": Client.objects.filter(
-                business=business
-            ).count(),
+            "clients": clients_count,
+            "vendors": vendors_count,
+            "active_vendors": Vendor.objects.filter(business=business, is_active=True).count(),
+            "quotations": quotes_count,
+            "invoices": invoices_count,
+            "paid_invoices": inv_paid,
+            "pending_invoices": inv_under_review,
+            "overdue_invoices": invoices.filter(status=Invoice.Status.OVERDUE).count(),
+            "total_revenue": total_revenue_val,
+            "pending_amount": invoices.aggregate(total=Sum("balance_due"))["total"] or 0,
+            
+            # Stat Cards
+            "stats": {
+                "clients": {"value": clients_count, "growth": "+0.0%", "from": "from last month"},
+                "vendors": {"value": vendors_count, "growth": "+0.0%", "from": "from last month"},
+                "quotations": {"value": quotes_count, "growth": "+0.0%", "from": "from last month"},
+                "invoices": {"value": invoices_count, "growth": "+0.0%", "from": "from last month"},
+                "revenue": {"value": f"₹{total_revenue_val:,.2f}", "raw": total_revenue_val, "growth": "+0.0%", "from": "from last month"},
+            },
 
-            "vendors": Vendor.objects.filter(
-                business=business
-            ).count(),
-
-            "active_vendors": Vendor.objects.filter(
-                business=business,
-                is_active=True
-            ).count(),
-
-            "invoices": invoices.count(),
-
-            "paid_invoices": invoices.filter(
-                status=Invoice.Status.PAID
-            ).count(),
-
-            "pending_invoices": invoices.filter(
-                status__in=[
-                    Invoice.Status.SENT,
-                    Invoice.Status.PARTIALLY_PAID,
+            # Quotations Status Breakdown (Donut Chart)
+            "quotations_by_status": {
+                "total": quotes_count,
+                "breakdown": [
+                    {"name": "Pending", "value": quotes_pending, "color": "#F59E0B", "percentage": round((quotes_pending / total_q_safe) * 100, 1)},
+                    {"name": "Under Review", "value": quotes_under_review, "color": "#3B82F6", "percentage": round((quotes_under_review / total_q_safe) * 100, 1)},
+                    {"name": "Approved", "value": quotes_approved, "color": "#10B981", "percentage": round((quotes_approved / total_q_safe) * 100, 1)},
+                    {"name": "Rejected", "value": quotes_rejected, "color": "#EF4444", "percentage": round((quotes_rejected / total_q_safe) * 100, 1)},
                 ]
-            ).count(),
+            },
 
-            "overdue_invoices": invoices.filter(
-                status=Invoice.Status.OVERDUE
-            ).count(),
+            # Invoices Status Breakdown (Donut Chart)
+            "invoices_by_status": {
+                "total": invoices_count,
+                "breakdown": [
+                    {"name": "Draft", "value": inv_draft, "color": "#F59E0B", "percentage": round((inv_draft / total_i_safe) * 100, 1)},
+                    {"name": "Under Review", "value": inv_under_review, "color": "#3B82F6", "percentage": round((inv_under_review / total_i_safe) * 100, 1)},
+                    {"name": "Approved", "value": inv_approved, "color": "#10B981", "percentage": round((inv_approved / total_i_safe) * 100, 1)},
+                    {"name": "Paid", "value": inv_paid, "color": "#8B5CF6", "percentage": round((inv_paid / total_i_safe) * 100, 1)},
+                ]
+            },
 
-            "total_revenue": (
-                payments.filter(
-                    status=Payment.Status.SUCCESS
-                ).aggregate(
-                    total=Sum("amount")
-                )["total"] or 0
-            ),
+            # Quotation & Invoice Overview
+            "overview_chart": [],
 
-            "pending_amount": (
-                invoices.aggregate(
-                    total=Sum("balance_due")
-                )["total"] or 0
-            ),
-
-            "recent_clients": [
+            # Recent Quotations Table
+            "recent_quotations": [
                 {
-                    "id": c.id,
-                    "name": c.name,
-                    "company_name": c.company_name,
-                    "email": c.email,
-                    "invoice_count": Invoice.objects.filter(client=c).count(),
-                    "total_billed": (
-                        Invoice.objects.filter(client=c).aggregate(total=Sum("total"))["total"] or 0
-                    ),
-                    "outstanding": (
-                        Invoice.objects.filter(client=c)
-                        .exclude(status=Invoice.Status.PAID)
-                        .aggregate(total=Sum("balance_due"))["total"]
-                        or 0
-                    ),
+                    "id": q.id,
+                    "quote_number": q.quote_number,
+                    "client": q.client.name if q.client else "Client",
+                    "vendor": getattr(q, "vendor_name", "-") or "-",
+                    "amount": f"₹{int(q.total):,}" if q.total else "₹0",
+                    "status": "Pending" if q.status == Quote.Status.DRAFT else ("Under Review" if q.status == Quote.Status.SENT else ("Approved" if q.status == Quote.Status.ACCEPTED else "Rejected")),
+                    "date": str(q.issue_date or ""),
                 }
-                for c in Client.objects.filter(business=business).order_by("-created_at")[:6]
+                for q in quotes.order_by("-created_at")[:5]
             ],
 
-            "recent_vendors": [
-                {
-                    "id": v.id,
-                    "name": v.name,
-                    "company_name": v.company_name or v.name,
-                    "email": v.email,
-                    "phone": v.phone,
-                    "category": v.get_category_display() if hasattr(v, "get_category_display") else "Supplier",
-                    "terms": "Net 30",
-                    "due_amount": 0,
-                }
-                for v in Vendor.objects.filter(business=business).order_by("-created_at")[:6]
-            ],
-
-            "urgent_items": [
-                {
-                    "id": f"inv-{i.id}",
-                    "type": "overdue_invoice" if i.status == Invoice.Status.OVERDUE else "pending_invoice",
-                    "title": f"Invoice: #{i.invoice_number}",
-                    "entity": i.client.name if i.client else "Client",
-                    "amount": float(i.balance_due or i.total or 0),
-                    "days_overdue": 1 if i.status == Invoice.Status.OVERDUE else 0,
-                    "status": i.status,
-                    "due_date": str(i.due_date) if i.due_date else "",
-                    "action_label": "Remind Client",
-                    "action_link": f"/admin/invoices/{i.id}",
-                }
-                for i in invoices.filter(
-                    status__in=[Invoice.Status.OVERDUE, Invoice.Status.SENT, Invoice.Status.PARTIALLY_PAID]
-                ).order_by("-created_at")[:5]
-            ] + [
-                {
-                    "id": f"quo-{q.id}",
-                    "type": "pending_quote",
-                    "title": f"Quotation: #{q.quote_number}",
-                    "entity": q.client.name if q.client else "Client",
-                    "amount": float(q.total or 0),
-                    "days_overdue": 0,
-                    "status": q.status,
-                    "due_date": str(q.valid_until) if hasattr(q, "valid_until") and q.valid_until else "",
-                    "action_label": "Follow Up",
-                    "action_link": f"/admin/quotes/{q.id}",
-                }
-                for q in Quote.objects.filter(business=business, status=Quote.Status.SENT).order_by("-created_at")[:3]
-            ],
-
+            # Recent Invoices Table
             "recent_invoices": [
                 {
                     "id": i.id,
                     "invoice_number": i.invoice_number,
-                    "client": i.client.name if i.client else "Unknown Client",
-                    "total": i.total,
-                    "status": i.status,
-                    "issue_date": i.issue_date,
-                    "due_date": i.due_date,
+                    "client": i.client.name if i.client else "Client",
+                    "amount": f"₹{int(i.total):,}" if i.total else "₹0",
+                    "status": "Paid" if i.status == Invoice.Status.PAID else ("Partially Paid" if i.status == Invoice.Status.PARTIALLY_PAID else ("Sent" if i.status == Invoice.Status.SENT else ("Overdue" if i.status == Invoice.Status.OVERDUE else "Draft"))),
+                    "date": str(i.issue_date or ""),
                 }
-                for i in invoices.order_by("-created_at")[:6]
+                for i in invoices.order_by("-created_at")[:5]
             ],
 
-            "recent_payments": [
-                {
-                    "id": p.id,
-                    "invoice": p.invoice.invoice_number if p.invoice else "Direct",
-                    "amount": p.amount,
-                    "method": p.method,
-                    "status": p.status,
-                    "created_at": p.created_at,
-                }
-                for p in payments.order_by("-created_at")[:6]
-            ],
+            # Recent Activity Timeline Feed
+            "recent_activities": recent_activities,
             
             "revenue_chart": [
                 {

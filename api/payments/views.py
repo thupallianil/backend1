@@ -53,11 +53,18 @@ def record_successful_payment(payment):
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 def payment_list_create(request):
-    is_admin = is_admin_user(request.user)
-    business = get_user_business(request.user) if is_admin else None
+    from api.tenant_helpers import resolve_user_context, get_request_business
+    role, user_biz, entity = resolve_user_context(request.user)
+    business = user_biz or get_request_business(request)
 
     if request.method == "GET":
-        if is_admin:
+        if role == "SUPER_ADMIN":
+            biz_id = request.query_params.get("business_id")
+            payments = Payment.objects.all()
+            if biz_id:
+                payments = payments.filter(business_id=biz_id)
+            payments = payments.select_related("invoice", "business").order_by("-created_at")
+        elif role in ["ADMIN", "VENDOR"]:
             payments = Payment.objects.filter(
                 business=business
             ).order_by("-created_at")
@@ -92,6 +99,27 @@ def payment_list_create(request):
         payment = serializer.save(
             business=business or serializer.validated_data["invoice"].business
         )
+
+        # Automatically update invoice paid_amount, balance_due, and status if payment is SUCCESS
+        if payment.status == Payment.Status.SUCCESS and payment.invoice:
+            invoice = payment.invoice
+            if not payment.paid_at:
+                payment.paid_at = timezone.now()
+                payment.save(update_fields=["paid_at"])
+
+            from django.db.models import Sum
+            total_paid = Payment.objects.filter(
+                invoice=invoice,
+                status=Payment.Status.SUCCESS
+            ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+
+            invoice.paid_amount = total_paid
+            invoice.balance_due = max(Decimal("0.00"), invoice.total - total_paid)
+            if invoice.balance_due == Decimal("0.00") and invoice.total > Decimal("0.00"):
+                invoice.status = Invoice.Status.PAID
+            elif total_paid > Decimal("0.00"):
+                invoice.status = Invoice.Status.PARTIALLY_PAID
+            invoice.save(update_fields=["paid_amount", "balance_due", "status", "updated_at"])
 
         return Response(
             {

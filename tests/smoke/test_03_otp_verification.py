@@ -129,7 +129,9 @@ def test_resend_otp_generates_new_code(api_client):
         "password_confirm": "StrongPassword999!",
     }
     api_client.post("/api/auth/register/request-otp/", req_payload, format="json")
-    first_otp = SignupVerificationOTP.objects.get(email=email).otp_code
+    record = SignupVerificationOTP.objects.get(email=email)
+    record.created_at = timezone.now() - timezone.timedelta(seconds=65)
+    record.save(update_fields=["created_at"])
 
     # Trigger resend OTP
     resend_res = api_client.post("/api/auth/register/resend-otp/", {"email": email}, format="json")

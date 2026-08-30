@@ -148,6 +148,15 @@ class BusinessProfile(TimeStampedModel):
         default="Asia/Kolkata",
     )
 
+    is_active = models.BooleanField(
+        default=True,
+    )
+
+    status = models.CharField(
+        max_length=30,
+        default="active",
+    )
+
     class Meta:
         ordering = [
             "business_name"
@@ -429,6 +438,14 @@ class Client(TimeStampedModel):
         default=True,
     )
 
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="client_records",
+    )
+
     class Meta:
         ordering = [
             "-created_at"
@@ -683,6 +700,14 @@ class Invoice(TimeStampedModel):
 
     quote = models.ForeignKey(
         Quote,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="invoices",
+    )
+
+    project = models.ForeignKey(
+        "Project",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -1394,6 +1419,14 @@ class Vendor(TimeStampedModel):
         default=True,
     )
 
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="vendor_records",
+    )
+
     class Meta:
         ordering = ["-created_at"]
         indexes = [
@@ -1403,6 +1436,63 @@ class Vendor(TimeStampedModel):
 
     def __str__(self):
         return self.company_name or self.name
+
+
+# ============================================================
+# USER PROFILE & EXTENDED ROLE MODEL
+# ============================================================
+
+class UserProfile(TimeStampedModel):
+
+    class Role(models.TextChoices):
+        SUPER_ADMIN = "super_admin", "Super Admin"
+        ADMIN = "admin", "Admin"
+        VENDOR = "vendor", "Vendor"
+        CLIENT = "client", "Client"
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="profile",
+    )
+
+    role = models.CharField(
+        max_length=20,
+        choices=Role.choices,
+        default=Role.CLIENT,
+    )
+
+    phone = models.CharField(
+        max_length=30,
+        blank=True,
+        default="",
+    )
+
+    avatar = models.ImageField(
+        upload_to="profiles/avatars/",
+        blank=True,
+        null=True,
+    )
+
+    vendor = models.ForeignKey(
+        Vendor,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="linked_users",
+    )
+
+    client = models.ForeignKey(
+        "Client",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="linked_users",
+    )
+
+    def __str__(self):
+        return f"{self.user.username} ({self.role})"
+
 
 
 # ============================================================
@@ -1471,6 +1561,863 @@ class PasswordResetOTP(TimeStampedModel):
 
     def __str__(self):
         return f"Reset OTP for {self.email} ({self.otp})"
+
+
+# ============================================================
+# PROJECT & MEMBERSHIP
+# ============================================================
+
+class Project(TimeStampedModel):
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        PENDING = "pending", "Pending"
+        ACTIVE = "active", "Active"
+        ASSIGNED = "assigned", "Assigned"
+        IN_PROGRESS = "in_progress", "In Progress"
+        SUBMITTED = "submitted", "Submitted"
+        UNDER_REVIEW = "under_review", "Under Review"
+        REVISION_REQUIRED = "revision_required", "Revision Required"
+        APPROVED = "approved", "Approved"
+        CLIENT_REVIEW = "client_review", "Client Review"
+        CLIENT_APPROVED = "client_approved", "Client Approved"
+        COMPLETED = "completed", "Completed"
+        CANCELLED = "cancelled", "Cancelled"
+
+    class Priority(models.TextChoices):
+        LOW = "low", "Low"
+        MEDIUM = "medium", "Medium"
+        HIGH = "high", "High"
+        URGENT = "urgent", "Urgent"
+
+    business = models.ForeignKey(
+        BusinessProfile,
+        on_delete=models.CASCADE,
+        related_name="projects",
+    )
+
+    client = models.ForeignKey(
+        Client,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="projects",
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_projects",
+    )
+
+    title = models.CharField(
+        max_length=255,
+    )
+
+    code = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+    )
+
+    description = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    status = models.CharField(
+        max_length=30,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+
+    priority = models.CharField(
+        max_length=20,
+        choices=Priority.choices,
+        default=Priority.MEDIUM,
+    )
+
+    budget = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+
+    start_date = models.DateField(
+        null=True,
+        blank=True,
+    )
+
+    end_date = models.DateField(
+        null=True,
+        blank=True,
+    )
+
+    progress_percentage = models.PositiveIntegerField(
+        default=0,
+    )
+
+    assigned_vendors = models.ManyToManyField(
+        Vendor,
+        through="ProjectMember",
+        related_name="assigned_projects",
+        blank=True,
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["business", "status"]),
+            models.Index(fields=["client", "status"]),
+        ]
+
+    def __str__(self):
+        return f"[{self.code or self.id}] {self.title}"
+
+
+class ProjectMember(TimeStampedModel):
+
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name="members",
+    )
+
+    vendor = models.ForeignKey(
+        Vendor,
+        on_delete=models.CASCADE,
+        related_name="project_memberships",
+    )
+
+    role = models.CharField(
+        max_length=100,
+        default="Assigned Vendor",
+    )
+
+    assigned_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    class Meta:
+        unique_together = ("project", "vendor")
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.vendor.name} on {self.project.title}"
+
+
+# ============================================================
+# TASK & COMMENTS
+# ============================================================
+
+class Task(TimeStampedModel):
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        IN_PROGRESS = "in_progress", "In Progress"
+        SUBMITTED = "submitted", "Submitted"
+        UNDER_REVIEW = "under_review", "Under Review"
+        REVISION_REQUIRED = "revision_required", "Revision Required"
+        COMPLETED = "completed", "Completed"
+        BLOCKED = "blocked", "Blocked"
+
+    class Priority(models.TextChoices):
+        LOW = "low", "Low"
+        MEDIUM = "medium", "Medium"
+        HIGH = "high", "High"
+        URGENT = "urgent", "Urgent"
+
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name="tasks",
+    )
+
+    business = models.ForeignKey(
+        BusinessProfile,
+        on_delete=models.CASCADE,
+        related_name="tasks",
+    )
+
+    assigned_vendor = models.ForeignKey(
+        Vendor,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_tasks",
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_tasks",
+    )
+
+    title = models.CharField(
+        max_length=255,
+    )
+
+    description = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    priority = models.CharField(
+        max_length=20,
+        choices=Priority.choices,
+        default=Priority.MEDIUM,
+    )
+
+    status = models.CharField(
+        max_length=30,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+
+    start_date = models.DateField(
+        null=True,
+        blank=True,
+    )
+
+    due_date = models.DateField(
+        null=True,
+        blank=True,
+    )
+
+    progress_percentage = models.PositiveIntegerField(
+        default=0,
+    )
+
+    estimated_hours = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+
+    actual_hours = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+
+    class Meta:
+        ordering = ["due_date", "-created_at"]
+        indexes = [
+            models.Index(fields=["project", "status"]),
+            models.Index(fields=["assigned_vendor", "status"]),
+            models.Index(fields=["business", "status"]),
+        ]
+
+    def __str__(self):
+        return f"Task: {self.title} ({self.status})"
+
+
+class TaskComment(TimeStampedModel):
+
+    task = models.ForeignKey(
+        Task,
+        on_delete=models.CASCADE,
+        related_name="comments",
+    )
+
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="task_comments",
+    )
+
+    author_role = models.CharField(
+        max_length=20,
+        default="admin",
+    )
+
+    message = models.TextField()
+
+    attachment = models.FileField(
+        upload_to="tasks/comments/",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"Comment by {self.author.username} on {self.task.title}"
+
+
+# ============================================================
+# DELIVERABLE & MULTI-TIER APPROVALS
+# ============================================================
+
+class Deliverable(TimeStampedModel):
+
+    class Status(models.TextChoices):
+        SUBMITTED = "submitted", "Submitted"
+        ADMIN_REVIEW = "admin_review", "Under Admin Review"
+        REVISION_REQUIRED = "revision_required", "Revision Required"
+        ADMIN_APPROVED = "admin_approved", "Admin Approved"
+        CLIENT_REVIEW = "client_review", "Under Client Review"
+        CLIENT_CHANGES_REQUESTED = "client_changes_requested", "Client Changes Requested"
+        CLIENT_APPROVED = "client_approved", "Client Approved"
+        COMPLETED = "completed", "Completed"
+
+    task = models.ForeignKey(
+        Task,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="deliverables",
+    )
+
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name="deliverables",
+    )
+
+    business = models.ForeignKey(
+        BusinessProfile,
+        on_delete=models.CASCADE,
+        related_name="deliverables",
+    )
+
+    vendor = models.ForeignKey(
+        Vendor,
+        on_delete=models.CASCADE,
+        related_name="deliverables",
+    )
+
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="submitted_deliverables",
+    )
+
+    title = models.CharField(
+        max_length=255,
+    )
+
+    description = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    version = models.CharField(
+        max_length=20,
+        default="v1.0",
+    )
+
+    file_attachment = models.FileField(
+        upload_to="deliverables/files/",
+        null=True,
+        blank=True,
+    )
+
+    external_url = models.URLField(
+        blank=True,
+        default="",
+    )
+
+    status = models.CharField(
+        max_length=40,
+        choices=Status.choices,
+        default=Status.SUBMITTED,
+    )
+
+    admin_notes = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    client_notes = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["project", "status"]),
+            models.Index(fields=["vendor", "status"]),
+            models.Index(fields=["business", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.title} ({self.version}) - {self.status}"
+
+
+class DeliverableApproval(TimeStampedModel):
+
+    class Action(models.TextChoices):
+        APPROVE = "approve", "Approved"
+        REJECT = "reject", "Rejected / Revision Required"
+        REQUEST_CHANGES = "request_changes", "Changes Requested"
+
+    deliverable = models.ForeignKey(
+        Deliverable,
+        on_delete=models.CASCADE,
+        related_name="approvals",
+    )
+
+    reviewer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="deliverable_reviews",
+    )
+
+    reviewer_role = models.CharField(
+        max_length=20,
+        choices=[("admin", "Admin"), ("client", "Client")],
+    )
+
+    action = models.CharField(
+        max_length=30,
+        choices=Action.choices,
+    )
+
+    feedback = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.reviewer_role.upper()} {self.action} on {self.deliverable.title}"
+
+
+# ============================================================
+# DOCUMENTS
+# ============================================================
+
+class Document(TimeStampedModel):
+
+    class AccessLevel(models.TextChoices):
+        ADMIN_ONLY = "admin_only", "Admin Only"
+        PROJECT_MEMBERS = "project_members", "Project Members & Vendor"
+        CLIENT_VISIBLE = "client_visible", "Client & Project Members"
+        PUBLIC_TENANT = "public_tenant", "All Tenant Users"
+
+    business = models.ForeignKey(
+        BusinessProfile,
+        on_delete=models.CASCADE,
+        related_name="documents",
+    )
+
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="documents",
+    )
+
+    task = models.ForeignKey(
+        Task,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="documents",
+    )
+
+    client = models.ForeignKey(
+        Client,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="documents",
+    )
+
+    vendor = models.ForeignKey(
+        Vendor,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="documents",
+    )
+
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="uploaded_documents",
+    )
+
+    title = models.CharField(
+        max_length=255,
+    )
+
+    file = models.FileField(
+        upload_to="documents/",
+    )
+
+    file_type = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+    )
+
+    file_size = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+    )
+
+    access_level = models.CharField(
+        max_length=30,
+        choices=AccessLevel.choices,
+        default=AccessLevel.PROJECT_MEMBERS,
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["business", "access_level"]),
+            models.Index(fields=["project"]),
+        ]
+
+    def __str__(self):
+        return self.title
+
+
+# ============================================================
+# MESSAGES & ROLE COMMUNICATION
+# ============================================================
+
+class Message(TimeStampedModel):
+
+    class ConversationType(models.TextChoices):
+        DIRECT_ADMIN_VENDOR = "direct_admin_vendor", "Admin <-> Vendor"
+        DIRECT_ADMIN_CLIENT = "direct_admin_client", "Admin <-> Client"
+        PROJECT_ROOM = "project_room", "Project Team Room"
+
+    business = models.ForeignKey(
+        BusinessProfile,
+        on_delete=models.CASCADE,
+        related_name="messages",
+    )
+
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="messages",
+    )
+
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="sent_messages",
+    )
+
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="received_messages",
+    )
+
+    conversation_type = models.CharField(
+        max_length=40,
+        choices=ConversationType.choices,
+        default=ConversationType.DIRECT_ADMIN_VENDOR,
+    )
+
+    content = models.TextField()
+
+    attachment = models.FileField(
+        upload_to="messages/attachments/",
+        null=True,
+        blank=True,
+    )
+
+    is_read = models.BooleanField(
+        default=False,
+    )
+
+    class Meta:
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["business", "conversation_type"]),
+            models.Index(fields=["sender", "is_read"]),
+            models.Index(fields=["recipient", "is_read"]),
+        ]
+
+    def __str__(self):
+        return f"Msg from {self.sender.username} ({self.conversation_type})"
+
+
+# ============================================================
+# AUDIT LOGGING
+# ============================================================
+
+class AuditLog(TimeStampedModel):
+
+    business = models.ForeignKey(
+        BusinessProfile,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="audit_logs",
+    )
+
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_actions",
+    )
+
+    actor_role = models.CharField(
+        max_length=30,
+        blank=True,
+        default="",
+    )
+
+    action = models.CharField(
+        max_length=100,
+    )
+
+    entity_type = models.CharField(
+        max_length=100,
+    )
+
+    entity_id = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+    )
+
+    details = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    ip_address = models.GenericIPAddressField(
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["business", "created_at"]),
+            models.Index(fields=["action"]),
+            models.Index(fields=["entity_type", "entity_id"]),
+        ]
+
+    def __str__(self):
+        return f"[{self.created_at.strftime('%Y-%m-%d %H:%M')}] {self.action} by {self.actor_role or 'System'}"
+
+
+# ============================================================
+# SUBSCRIPTION & SAAS PLANS
+# ============================================================
+
+class Subscription(TimeStampedModel):
+
+    class Plan(models.TextChoices):
+        FREE_TRIAL = "FREE_TRIAL", "Free Trial"
+        STARTER = "STARTER", "Starter"
+        PROFESSIONAL = "PROFESSIONAL", "Professional"
+        ENTERPRISE = "ENTERPRISE", "Enterprise"
+
+    class Status(models.TextChoices):
+        TRIAL_ACTIVE = "TRIAL_ACTIVE", "Trial Active"
+        TRIAL_EXHAUSTED = "TRIAL_EXHAUSTED", "Trial Exhausted"
+        ACTIVE = "ACTIVE", "Active"
+        PAST_DUE = "PAST_DUE", "Past Due"
+        CANCELLED = "CANCELLED", "Cancelled"
+        EXPIRED = "EXPIRED", "Expired"
+
+    business = models.OneToOneField(
+        BusinessProfile,
+        on_delete=models.CASCADE,
+        related_name="subscription",
+    )
+
+    plan_name = models.CharField(
+        max_length=50,
+        choices=Plan.choices,
+        default=Plan.FREE_TRIAL,
+    )
+
+    status = models.CharField(
+        max_length=30,
+        choices=Status.choices,
+        default=Status.TRIAL_ACTIVE,
+    )
+
+    monthly_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+
+    billing_cycle = models.CharField(
+        max_length=20,
+        default="monthly",
+    )
+
+    max_projects = models.PositiveIntegerField(
+        default=5,
+    )
+
+    max_users = models.PositiveIntegerField(
+        default=5,
+    )
+
+    trial_limit = models.PositiveIntegerField(
+        default=5,
+    )
+
+    trial_used = models.PositiveIntegerField(
+        default=0,
+    )
+
+    trial_started_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        default=timezone.now,
+    )
+
+    trial_ended_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    valid_until = models.DateField(
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["business", "status"]),
+            models.Index(fields=["plan_name", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.business.business_name} - {self.plan_name} ({self.status})"
+
+
+# ============================================================
+# AUTOMATIC SUBSCRIPTION SIGNALS
+# ============================================================
+
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+@receiver(post_save, sender=BusinessProfile)
+def auto_create_business_free_trial(sender, instance, created, **kwargs):
+    """
+    Ensures every newly created Business/Tenant automatically receives a FREE_TRIAL subscription.
+    """
+    if created:
+        Subscription.objects.get_or_create(
+            business=instance,
+            defaults={
+                "plan_name": Subscription.Plan.FREE_TRIAL,
+                "status": Subscription.Status.TRIAL_ACTIVE,
+                "trial_limit": 5,
+                "trial_used": 0,
+                "max_projects": 5,
+                "max_users": 5,
+                "monthly_price": Decimal("0.00"),
+            }
+        )
+
+# ============================================================
+# GLOBAL PLATFORM SETTINGS (SUPER ADMIN ONLY)
+# ============================================================
+
+class GlobalPlatformSettings(TimeStampedModel):
+    # 1. PLATFORM & BRANDING
+    platform_name = models.CharField(max_length=255, default="Enterprise Multi-Tenant SaaS Platform")
+    logo_url = models.CharField(max_length=500, blank=True, default="")
+    favicon_url = models.CharField(max_length=500, blank=True, default="")
+    support_email = models.EmailField(default="support@system.io")
+    support_phone = models.CharField(max_length=50, blank=True, default="+1 800 555 0199")
+    default_currency = models.CharField(max_length=10, default="USD")
+    default_timezone = models.CharField(max_length=100, default="UTC")
+    date_format = models.CharField(max_length=50, default="YYYY-MM-DD")
+    platform_description = models.TextField(blank=True, default="Comprehensive multi-tenant business and project workspace management.")
+
+    # 2. FREE TRIAL
+    trial_enabled = models.BooleanField(default=True)
+    trial_limit = models.PositiveIntegerField(default=5)
+    trial_type = models.CharField(max_length=50, default="PROJECTS")
+    action_after_limit = models.CharField(max_length=50, default="REQUIRE_UPGRADE")
+
+    # 3. SUBSCRIPTION PLANS (Stored as structured JSON)
+    plans_config = models.JSONField(default=dict, blank=True)
+
+    # 4. PAYMENT & PLATFORM BILLING
+    platform_payment_gateway = models.CharField(max_length=100, default="Razorpay / Stripe")
+    merchant_account_status = models.CharField(max_length=100, default="Connected & Active")
+    settlement_status = models.CharField(max_length=100, default="Operational")
+    billing_currency = models.CharField(max_length=10, default="USD")
+    webhook_status = models.CharField(max_length=100, default="Live (200 OK)")
+
+    # 5. EMAIL / SMTP
+    smtp_provider = models.CharField(max_length=100, default="SendGrid / Custom SMTP")
+    smtp_host = models.CharField(max_length=255, default="smtp.sendgrid.net")
+    smtp_port = models.PositiveIntegerField(default=587)
+    smtp_username = models.CharField(max_length=255, default="apikey")
+    from_email = models.EmailField(default="no-reply@system.io")
+    from_name = models.CharField(max_length=255, default="Platform System Notifications")
+    smtp_encryption = models.CharField(max_length=20, default="TLS")
+
+    # 6. NOTIFICATIONS (Stored as structured JSON)
+    notification_events = models.JSONField(default=dict, blank=True)
+
+    # 7. SECURITY & ACCESS
+    min_password_length = models.PositiveIntegerField(default=8)
+    require_special_char = models.BooleanField(default=True)
+    session_timeout_minutes = models.PositiveIntegerField(default=120)
+    login_attempt_limit = models.PositiveIntegerField(default=5)
+    invitation_expiry_days = models.PositiveIntegerField(default=7)
+    enforce_mfa = models.BooleanField(default=False)
+
+    # 8. SYSTEM DEFAULTS
+    default_business_currency = models.CharField(max_length=10, default="USD")
+    default_business_timezone = models.CharField(max_length=100, default="UTC")
+    default_business_plan = models.CharField(max_length=50, default="FREE_TRIAL")
+    default_business_status = models.CharField(max_length=30, default="active")
+
+    @classmethod
+    def get_settings(cls):
+        obj, created = cls.objects.get_or_create(id=1)
+        if created or not obj.plans_config:
+            obj.plans_config = {
+                "STARTER": {"name": "Starter", "price": 29, "max_projects": 20, "max_users": 10, "is_active": True},
+                "PROFESSIONAL": {"name": "Professional", "price": 79, "max_projects": 100, "max_users": 50, "is_active": True},
+                "ENTERPRISE": {"name": "Enterprise", "price": 199, "max_projects": 500, "max_users": 200, "is_active": True},
+            }
+            obj.notification_events = {
+                "new_business": {"in_app": True, "email": True},
+                "trial_exhausted": {"in_app": True, "email": True},
+                "subscription_upgrade": {"in_app": True, "email": True},
+                "subscription_payment": {"in_app": True, "email": True},
+                "payment_failure": {"in_app": True, "email": True},
+                "business_suspended": {"in_app": True, "email": True},
+                "security_events": {"in_app": True, "email": True},
+            }
+            obj.save()
+        return obj
 
 
 

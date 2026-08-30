@@ -663,10 +663,11 @@ GOOGLE_CLIENT_ID = os.environ.get(
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "").strip()
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "").strip()
-EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "").strip()
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "").strip().replace(" ", "")
 EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True").lower() in ("true", "1", "yes")
 EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "False").lower() in ("true", "1", "yes")
 EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", 5))
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "no-reply@invoiceflow.com")
 is_placeholder_user = not EMAIL_HOST_USER or "yourgmail" in EMAIL_HOST_USER.lower() or "example.com" in EMAIL_HOST_USER.lower()
 is_placeholder_pass = not EMAIL_HOST_PASSWORD or "your-gmail" in EMAIL_HOST_PASSWORD.lower() or "app-password" in EMAIL_HOST_PASSWORD.lower()
 
@@ -674,6 +675,27 @@ if EMAIL_HOST and not is_placeholder_user and not is_placeholder_pass:
     EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 else:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
+
+# ============================================================
+# SIMPLE JWT CONFIGURATION (Long-lived & stable sessions)
+# ============================================================
+
+from datetime import timedelta
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(days=7),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
+    "ROTATE_REFRESH_TOKENS": False,
+    "BLACKLIST_AFTER_ROTATION": False,
+    "UPDATE_LAST_LOGIN": True,
+    "ALGORITHM": "HS256",
+    "SIGNING_KEY": SECRET_KEY,
+    "AUTH_HEADER_TYPES": ("Bearer",),
+    "AUTH_HEADER_NAME": "HTTP_AUTHORIZATION",
+    "USER_ID_FIELD": "id",
+    "USER_ID_CLAIM": "user_id",
+}
 
 
 # ============================================================

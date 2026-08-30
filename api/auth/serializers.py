@@ -106,7 +106,7 @@ class RegisterSerializer(serializers.Serializer):
 
         # Normalize role
         role_val = str(attrs.get("role") or "client").strip().lower()
-        if role_val not in ["admin", "client"]:
+        if role_val not in ["super_admin", "admin", "vendor", "client"]:
             role_val = "client"
         attrs["role"] = role_val
 
@@ -137,18 +137,21 @@ class RegisterSerializer(serializers.Serializer):
                 email=email,
                 password=password,
                 first_name=username,
-                is_staff=(role == "admin"),
+                is_staff=(role in ["admin", "super_admin"]),
+                is_superuser=(role == "super_admin"),
             )
 
-            business = BusinessProfile.objects.create(
-                owner=user,
-                business_name=f"{username}'s Business",
-                email=email,
-            )
-
-            AppSettings.objects.create(
-                business=business,
-            )
+            if role in ["admin", "super_admin"]:
+                business, _ = BusinessProfile.objects.get_or_create(
+                    owner=user,
+                    defaults={
+                        "business_name": f"{username}'s Business",
+                        "email": email,
+                    },
+                )
+                AppSettings.objects.get_or_create(
+                    business=business,
+                )
 
         return user
 
@@ -168,7 +171,7 @@ class LoginSerializer(serializers.Serializer):
     def validate_role(self, value):
         if value:
             v = str(value).strip().lower()
-            if v in ["admin", "client"]:
+            if v in ["super_admin", "admin", "vendor", "client"]:
                 return v
         return None
 
@@ -319,7 +322,7 @@ class GoogleAuthSerializer(serializers.Serializer):
     def validate_role(self, value):
         if value:
             v = str(value).strip().lower()
-            if v in ["admin", "client"]:
+            if v in ["super_admin", "admin", "vendor", "client"]:
                 return v
         return "client"
 

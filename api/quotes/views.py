@@ -43,12 +43,18 @@ def get_user_business(user):
 @permission_classes([IsAuthenticated])
 def quote_list_create(request):
 
-    is_admin = is_admin_user(request.user)
-    business = get_user_business(request.user) if is_admin else None
+    from api.tenant_helpers import resolve_user_context, get_request_business
+    role, user_biz, entity = resolve_user_context(request.user)
+    business = user_biz or get_request_business(request)
 
     if request.method == "GET":
-
-        if is_admin:
+        if role == "SUPER_ADMIN":
+            biz_id = request.query_params.get("business_id")
+            quotes = Quote.objects.all()
+            if biz_id:
+                quotes = quotes.filter(business_id=biz_id)
+            quotes = quotes.select_related("client").prefetch_related("items").order_by("-created_at")
+        elif role in ["ADMIN", "VENDOR"]:
             quotes = Quote.objects.filter(
                 business=business
             ).select_related(
@@ -63,7 +69,7 @@ def quote_list_create(request):
             quotes = Quote.objects.filter(
                 client__email__iexact=request.user.email
             ).select_related(
-                "client", "business"
+                "client"
             ).prefetch_related(
                 "items"
             ).order_by(

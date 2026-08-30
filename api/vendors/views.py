@@ -18,17 +18,19 @@ def get_user_business(user):
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 def vendor_list_create(request):
-    business = get_user_business(request.user)
-
-    if not business:
-        business = BusinessProfile.objects.create(
-            owner=request.user,
-            business_name=f"{request.user.username}'s Business",
-            email=request.user.email,
-        )
+    from api.tenant_helpers import resolve_user_context, get_request_business
+    role, user_biz, entity = resolve_user_context(request.user)
+    business = user_biz or get_request_business(request)
 
     if request.method == "GET":
-        vendors = Vendor.objects.filter(business=business).order_by("-created_at")
+        if role == "SUPER_ADMIN":
+            biz_id = request.query_params.get("business_id")
+            vendors = Vendor.objects.all()
+            if biz_id:
+                vendors = vendors.filter(business_id=biz_id)
+            vendors = vendors.order_by("-created_at")
+        else:
+            vendors = Vendor.objects.filter(business=business).order_by("-created_at")
 
         # Search filter
         search = request.query_params.get("search", "").strip()

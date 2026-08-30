@@ -1,15 +1,23 @@
 from django.urls import include, path
-from .views import api_index, health_check, public_platform_stats
+from .views import api_index, health_check, public_platform_stats, public_ai_chatbot
 
 urlpatterns = [
     path("", api_index, name="api-index"),
     path("health/", health_check, name="api-health"),
     path("public-stats/", public_platform_stats, name="public-platform-stats"),
+    path("public-ai-chatbot/", public_ai_chatbot, name="public-ai-chatbot"),
     path("auth/", include("api.auth.urls")),
     path("settings/", include("api.settings.urls")),
     path("profile/", include("api.profile.urls")),
     path("clients/", include("api.clients.urls")),
     path("vendors/", include("api.vendors.urls")),
+    path("projects/", include("api.projects.urls")),
+    path("tasks/", include("api.tasks.urls")),
+    path("deliverables/", include("api.deliverables.urls")),
+    path("documents/", include("api.documents.urls")),
+    path("messages/", include("api.messages.urls")),
+    path("audit/", include("api.audit.urls")),
+    path("subscriptions/", include("api.subscriptions.urls")),
     path("quotes/", include("api.quotes.urls")),
     path("invoices/", include("api.invoices.urls")),
     path("payments/", include("api.payments.urls")),
@@ -18,4 +26,7 @@ urlpatterns = [
     path("reports/", include("api.reports.urls")),
     path("tickets/", include("api.tickets.urls")),
     path("notifications/", include("api.notifications.urls")),
+    path("superadmin/", include("api.superadmin.urls")),
+    path("vendor-portal/", include("api.vendor_portal.urls")),
+    path("client-portal/", include("api.client_portal.urls")),
 ]

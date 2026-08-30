@@ -63,7 +63,6 @@ class PaymentSerializer(
             "id",
             "invoice_number",
             "client_name",
-            "status",
             "gateway_order_id",
             "gateway_payment_id",
             "gateway_signature",

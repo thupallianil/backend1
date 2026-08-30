@@ -27,11 +27,27 @@ from rest_framework.response import Response
 
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.models import BusinessProfile, AppSettings, SignupVerificationOTP, PasswordResetOTP
+from api.models import (
+    BusinessProfile,
+    AppSettings,
+    SignupVerificationOTP,
+    PasswordResetOTP,
+    UserProfile,
+    Vendor,
+    Client,
+)
 
+from .serializers import (
+    RegisterSerializer,
+    LoginSerializer,
+    GoogleAuthSerializer,
+    RefreshTokenInputSerializer,
+    ChangePasswordSerializer,
+    ForgotPasswordSerializer,
+    ResetPasswordSerializer,
+)
 
 logger = logging.getLogger(__name__)
-
 
 import secrets
 
@@ -103,27 +119,45 @@ def send_otp_email(email, otp, name="User", purpose="signup"):
         print(f"\n=======================================================\n[DEBUG OTP - {purpose.upper()}] Sent to: {email} | CODE: {otp}\n=======================================================\n")
 
 
-from .serializers import (
-    RegisterSerializer,
-    LoginSerializer,
-    GoogleAuthSerializer,
-    RefreshTokenInputSerializer,
-    ChangePasswordSerializer,
-    ForgotPasswordSerializer,
-    ResetPasswordSerializer,
-)
-
 User = get_user_model()
 
 
 def get_user_role(user):
-    if user.is_superuser or user.is_staff:
+    if not user or not getattr(user, "is_authenticated", True):
+        return "client"
+
+    # 1. Super Admin: superuser flag
+    if getattr(user, "is_superuser", False):
+        return "super_admin"
+
+    # 2. Explicit UserProfile record
+    profile = getattr(user, "profile", None)
+    if profile and profile.role:
+        return profile.role
+
+    # 3. Vendor link or records
+    if getattr(user, "vendor_records", None) and user.vendor_records.exists():
+        return "vendor"
+    if Vendor.objects.filter(email__iexact=user.email).exists():
+        return "vendor"
+
+    # 4. Admin: is_staff or BusinessProfile owner
+    if getattr(user, "is_staff", False) or BusinessProfile.objects.filter(owner=user).exists():
         return "admin"
 
+    # 5. Client
     return "client"
 
 
 def user_data(user):
+    role = get_user_role(user)
+    profile = getattr(user, "profile", None)
+    avatar_url = ""
+    if profile and profile.avatar:
+        try:
+            avatar_url = profile.avatar.url
+        except Exception:
+            avatar_url = str(profile.avatar)
     return {
         "id": user.id,
         "username": user.username,
@@ -133,8 +167,11 @@ def user_data(user):
         "last_name": user.last_name,
         "is_staff": user.is_staff,
         "is_superuser": user.is_superuser,
-        "role": get_user_role(user),
+        "role": role,
+        "phone": profile.phone if profile else "",
+        "avatar": avatar_url,
     }
+
 
 
 def token_data(user):
@@ -364,19 +401,49 @@ def verify_signup_otp(request):
             email=email,
             password=password,
             first_name=username,
-            is_staff=(role == "admin"),
-            is_superuser=(role == "admin"),
+            is_staff=(role in ["admin", "super_admin"]),
+            is_superuser=(role == "super_admin"),
+        )
+
+        UserProfile.objects.get_or_create(
+            user=user,
+            defaults={"role": role},
         )
 
         if role == "admin":
             business, _ = BusinessProfile.objects.get_or_create(
                 owner=user,
                 defaults={
-                    "business_name": company_name,
+                    "business_name": company_name or f"{username}'s Business",
                     "email": user.email,
                 },
             )
             AppSettings.objects.get_or_create(business=business)
+        elif role == "vendor":
+            default_biz = BusinessProfile.objects.first()
+            if default_biz:
+                Vendor.objects.get_or_create(
+                    email=user.email,
+                    defaults={
+                        "name": username,
+                        "company_name": company_name or f"{username} Supplies",
+                        "business": default_biz,
+                        "user": user,
+                    },
+                )
+        elif role == "client":
+            default_biz = BusinessProfile.objects.first()
+            if default_biz:
+                from api.models import Client
+                Client.objects.get_or_create(
+                    email=user.email,
+                    defaults={
+                        "name": username,
+                        "company_name": company_name or f"{username} Enterprises",
+                        "business": default_biz,
+                        "user": user,
+                    },
+                )
 
         # Single-use: delete OTP record after successful account creation
         otp_record.delete()
@@ -556,14 +623,26 @@ def login(request):
 
     actual_role = get_user_role(authenticated_user)
 
-    if requested_role:
-        if requested_role != actual_role:
-            target_portal = "Admin" if actual_role == "admin" else "Client"
-            current_portal = "Admin" if requested_role == "admin" else "Client"
+    # Super Admin can authenticate through any portal tab
+    if authenticated_user.is_superuser or actual_role == "super_admin":
+        pass
+    elif requested_role and requested_role != actual_role:
+        # Check if staff/admin
+        if requested_role in ["admin", "super_admin"] and (authenticated_user.is_staff or actual_role in ["admin", "super_admin"]):
+            pass
+        else:
+            role_map = {
+                "super_admin": "Super Admin",
+                "admin": "Admin",
+                "vendor": "Vendor",
+                "client": "Client",
+            }
+            target_portal = role_map.get(actual_role, actual_role.title())
+            current_portal = role_map.get(requested_role, requested_role.title())
             return Response(
                 {
                     "success": False,
-                    "message": f"This account is registered as a {target_portal}. You cannot login through the {current_portal} portal. Please switch to the {target_portal} login tab.",
+                    "message": f"This account is registered as a {target_portal}. Please switch to the {target_portal} login tab.",
                     "role": actual_role,
                 },
                 status=status.HTTP_403_FORBIDDEN,
@@ -601,6 +680,8 @@ def me(request):
             name_val = str(data.get("name") or data.get("first_name") or "").strip()
             if name_val:
                 user.first_name = name_val
+        if "last_name" in data:
+            user.last_name = str(data.get("last_name") or "").strip()
         if "email" in data:
             email_val = str(data.get("email") or "").strip().lower()
             if email_val:
@@ -614,6 +695,26 @@ def me(request):
                     )
                 user.email = email_val
         user.save()
+
+        # Update UserProfile (phone & avatar)
+        from api.models import UserProfile
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        if "phone" in data:
+            profile.phone = str(data.get("phone") or "").strip()
+            profile.save()
+
+        if "avatar" in request.FILES:
+            profile.avatar = request.FILES["avatar"]
+            profile.save()
+        elif "avatar" in data and str(data["avatar"]).startswith("data:image"):
+            import base64
+            from django.core.files.base import ContentFile
+            try:
+                format, imgstr = str(data["avatar"]).split(";base64,")
+                ext = format.split("/")[-1]
+                profile.avatar.save(f"avatar_{user.id}.{ext}", ContentFile(base64.b64decode(imgstr)), save=True)
+            except Exception as e:
+                logger.warning(f"Failed to parse base64 avatar: {e}")
 
     return Response({
         "success": True,
@@ -1139,17 +1240,25 @@ def google_auth(request):
             )
 
         actual_role = get_user_role(user)
-        if role and role != actual_role:
-            target_portal = "Admin" if actual_role == "admin" else "Client"
-            current_portal = "Admin" if role == "admin" else "Client"
-            return Response(
-                {
-                    "success": False,
-                    "message": f"This Google account is registered as a {target_portal}. You cannot login through the {current_portal} portal. Please switch to the {target_portal} login tab.",
-                    "role": actual_role,
-                },
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        if role:
+            role_map = {
+                "super_admin": "Super Admin",
+                "admin": "Admin",
+                "vendor": "Vendor",
+                "client": "Client",
+            }
+            matched = (role == actual_role) or (role == "admin" and actual_role == "super_admin")
+            if not matched:
+                target_portal = role_map.get(actual_role, actual_role.title())
+                current_portal = role_map.get(role, role.title())
+                return Response(
+                    {
+                        "success": False,
+                        "message": f"This Google account is registered as a {target_portal}. You cannot login through the {current_portal} portal. Please switch to the {target_portal} login tab.",
+                        "role": actual_role,
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
 
         # Update profile names if previously blank
         updated_fields = []
@@ -1200,11 +1309,16 @@ def google_auth(request):
                 email=email,
                 first_name=given_name or display_name,
                 last_name=family_name,
-                is_staff=(role == "admin"),
-                is_superuser=(role == "admin"),
+                is_staff=(role in ["admin", "super_admin"]),
+                is_superuser=(role == "super_admin"),
             )
             user.set_unusable_password()
             user.save()
+
+            UserProfile.objects.get_or_create(
+                user=user,
+                defaults={"role": role or "client"},
+            )
 
             if role == "admin":
                 business, _ = BusinessProfile.objects.get_or_create(
@@ -1215,6 +1329,18 @@ def google_auth(request):
                     },
                 )
                 AppSettings.objects.get_or_create(business=business)
+            elif role == "vendor":
+                default_biz = BusinessProfile.objects.first()
+                if default_biz:
+                    Vendor.objects.get_or_create(
+                        email=email,
+                        defaults={
+                            "name": display_name or given_name or "Vendor",
+                            "company_name": f"{display_name}'s Supplies",
+                            "business": default_biz,
+                            "user": user,
+                        },
+                    )
 
         tokens = token_data(user)
         return Response(

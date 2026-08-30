@@ -67,10 +67,18 @@ def sync_client_portal_user(client, raw_password=None, auto_generate=False):
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 def client_list_create(request):
-    business = get_user_business(request.user)
+    from api.tenant_helpers import resolve_user_context, get_request_business
+    role, user_biz, entity = resolve_user_context(request.user)
+    business = user_biz or get_request_business(request)
 
     if request.method == "GET":
-        if business:
+        if role == "SUPER_ADMIN":
+            biz_id = request.query_params.get("business_id")
+            clients = Client.objects.all()
+            if biz_id:
+                clients = clients.filter(business_id=biz_id)
+            clients = clients.order_by("-created_at")
+        elif business:
             clients = Client.objects.filter(
                 business=business
             ).order_by("-created_at")
@@ -89,6 +97,13 @@ def client_list_create(request):
             "message": "Clients retrieved successfully",
             "data": serializer.data,
         })
+
+    role, _, _ = resolve_user_context(request.user)
+    if role not in ["ADMIN", "SUPER_ADMIN"]:
+        return Response(
+            {"success": False, "message": "Only administrators can create clients."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     serializer = ClientSerializer(
         data=request.data

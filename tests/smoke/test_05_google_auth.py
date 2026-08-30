@@ -27,13 +27,14 @@ def test_google_auth_flow_with_mocked_tokeninfo(api_client, mock_google_tokeninf
     payload = {
         "credential": "mocked_google_jwt_token_for_testing",
         "role": "ADMIN",
+        "mode": "signup",
     }
 
     # Verify user does not exist prior to Google login
     assert not User.objects.filter(email="google_test_user@gmail.com").exists()
 
     response = api_client.post("/api/auth/google/", payload, format="json")
-    assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.content}"
+    assert response.status_code in [200, 201], f"Expected 200 or 201, got {response.status_code}: {response.content}"
 
     body = response.json()
     assert body.get("success") is True

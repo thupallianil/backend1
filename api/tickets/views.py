@@ -58,19 +58,26 @@ def generate_ticket_number(business):
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def ticket_list(request):
     user = request.user
-    admin = is_admin_user(user)
+    from api.tenant_helpers import resolve_user_context, get_request_business
+    role, user_biz, entity = resolve_user_context(user)
+    business = user_biz or get_request_business(request)
+    is_admin = is_admin_user(user)
 
     if request.method == "GET":
-        if not admin:
+        if role == "SUPER_ADMIN":
+            biz_id = request.query_params.get("business_id")
+            tickets = Ticket.objects.all()
+            if biz_id:
+                tickets = tickets.filter(business_id=biz_id)
+            tickets = tickets.select_related("client", "business", "created_by").prefetch_related("messages").order_by("-created_at")
+        elif role in ["ADMIN", "VENDOR"]:
+            tickets = Ticket.objects.filter(
+                business=business
+            ).select_related("client", "business", "created_by").prefetch_related("messages").order_by("-created_at")
+        else:
             # Client view: find all tickets linked to this client email or created by this user
             tickets = Ticket.objects.filter(
                 Q(client__email__iexact=user.email) | Q(created_by=user)
-            ).select_related("client", "business", "created_by").prefetch_related("messages").order_by("-created_at")
-        else:
-            # Admin view: all tickets for business
-            business = get_or_create_business(user)
-            tickets = Ticket.objects.filter(
-                business=business
             ).select_related("client", "business", "created_by").prefetch_related("messages").order_by("-created_at")
 
         # Query filters
@@ -123,7 +130,7 @@ def ticket_list(request):
         }, status=status.HTTP_400_BAD_REQUEST)
 
     with transaction.atomic():
-        if not admin:
+        if not is_admin:
             # Client raised ticket
             client = Client.objects.filter(email__iexact=user.email).first()
             if client:
@@ -178,7 +185,7 @@ def ticket_list(request):
         TicketMessage.objects.create(
             ticket=ticket,
             sender=user,
-            sender_role="client" if not admin else "admin",
+            sender_role="client" if not is_admin else "admin",
             message=description,
             attachment=attachment,
         )

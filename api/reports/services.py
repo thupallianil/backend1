@@ -30,9 +30,12 @@ class ReportService:
     @staticmethod
     def get_business(user):
         try:
-            return BusinessProfile.objects.get(owner=user)
-        except BusinessProfile.DoesNotExist:
-            return None
+            biz = BusinessProfile.objects.filter(owner=user).first()
+            if not biz and (user.is_superuser or getattr(getattr(user, "profile", None), "role", None) == "super_admin"):
+                biz = BusinessProfile.objects.first()
+            return biz
+        except Exception:
+            return BusinessProfile.objects.first()
 
     # =========================================================
     # DASHBOARD
